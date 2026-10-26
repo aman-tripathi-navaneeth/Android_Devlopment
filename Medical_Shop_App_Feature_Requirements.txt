@@ -1,0 +1,328 @@
+MEDICAL SHOP MANAGEMENT APP
+FEATURE REQUIREMENTS
+Flutter Mobile Application | MongoDB Backend
+Draft for team review
+
+============================================================
+1. PURPOSE
+============================================================
+
+The Medical Shop Management App is a mobile-first application for medical shops. It is intended to help staff maintain a medicine catalogue, manage suppliers and purchase orders, record incoming and outgoing stock, monitor inventory, and manage supporting customer and payment workflows.
+
+Technology direction:
+- Mobile frontend: Flutter
+- Database: MongoDB
+- A backend API/service layer should validate requests and enforce business rules between Flutter and MongoDB.
+
+Scope note:
+The uploaded team document formally details Module 3 (Medicine Catalogue, Search and Units), Module 4 (Supplier and Purchase Orders), and Module 8 (Outward Sales Report Scanning). Other modules below reflect the wider app scope already discussed and should follow their own approved module documentation. Do not treat undocumented optional integrations as guaranteed requirements.
+
+============================================================
+2. AUTHENTICATION AND SHOP SETUP
+============================================================
+
+- User login and logout.
+- Basic shop profile and initial setup.
+- Access to the app's main modules after login.
+
+============================================================
+3. DASHBOARD AND REPORTS
+============================================================
+
+- Show an overview of inventory activity.
+- Summarize low-stock medicines and near-expiry medicines.
+- Highlight purchase orders and actions that need attention.
+- Provide basic purchase, sales, and stock reports.
+
+============================================================
+4. MEDICINE CATALOGUE, SEARCH AND UNITS (MODULE 3)
+============================================================
+
+- Create, edit, and deactivate medicine records.
+- Maintain a unique, permanent product ID for every medicine.
+- Store medicine name, generic name, strength, category, manufacturer, and dosage/pack form where applicable.
+- Define the pack unit and sale unit for each medicine.
+- Store unit conversion factors, such as one strip containing 10 tablets.
+- Search by medicine name, generic name, category, or product ID.
+- Support partial search and misspelled input where feasible.
+- Filter the medicine list by category, form, and active/inactive status.
+- Validate required fields and prevent invalid conversion factors, such as zero.
+- Warn about potential duplicate medicine records, including the same name from the same manufacturer.
+- Show medicine details, unit conversions, and links to stock/batch history where available.
+- Deactivate medicines rather than deleting records referenced by old invoices or sales.
+
+Rules:
+- A product ID must not change after it is created.
+- Strengths or other meaningful product differences should be represented as distinct records according to the team's agreed catalogue rules.
+- Other modules should read medicine details through the catalogue service/API rather than maintaining separate medicine names.
+
+============================================================
+5. PURCHASE INVOICE SCANNING AND STOCK INWARD
+============================================================
+
+- Capture a supplier invoice with the phone camera or upload a supported file.
+- Extract invoice text and line items using OCR.
+- Identify candidate catalogue medicines from extracted names or codes where available.
+- Display extracted information in an editable review screen.
+- Allow staff to correct fields and resolve unmatched or uncertain medicine lines.
+- Review quantities, batch details, expiry dates, and prices where present in the invoice.
+- Allow the user to confirm the reviewed invoice before posting.
+- Keep a history of processed invoices and their status.
+
+Rules:
+- OCR output is a draft, not a confirmed transaction.
+- Do not add stock until the user confirms the reviewed data and the backend successfully posts the inward transaction.
+- This module is separate from Supplier and Purchase Orders. It may match an invoice to an existing purchase order where supported by the agreed workflow.
+
+============================================================
+6. SUPPLIER MANAGEMENT AND PURCHASE ORDERS (MODULE 4)
+============================================================
+
+Supplier management:
+- Create, edit, and deactivate supplier records.
+- Store supplier name, contact information, GST number, and payment terms.
+- Search and filter suppliers by name and active/inactive status.
+- View supplier contact details, past orders, total order value, and open orders.
+
+Purchase orders:
+- Create a purchase order by selecting a supplier.
+- Add medicines from the medicine catalogue using product ID or catalogue search.
+- Enter ordered quantity and expected rate for each medicine.
+- Track order statuses: Draft, Sent, Partially Received, Received, and Cancelled.
+- View and filter purchase orders by status.
+- Highlight pending orders that need action.
+- View purchase order lines, supplier, quantities, rates, status, and relevant actions.
+- Send or cancel an order according to the permitted status transitions.
+- Record full or partial goods receipts against an order.
+- Enter received quantity for each line and record shortages.
+- Keep undelivered quantities open after a partial receipt.
+- Validate received quantities against ordered quantities. Any permitted over-receipt must require explicit user authorization.
+- View order history from the supplier detail screen.
+
+Rules:
+- A purchase order records what the shop intends to order; creating or sending it must not increase stock.
+- Only a confirmed and successfully posted goods receipt may create stock movements.
+- A cancelled order must not create stock movements.
+- A sent order should not be silently edited. If changes are required, follow the team's agreed cancellation/reissue process.
+- Every purchase-order line must refer to the catalogue's product ID.
+- Tax calculations should remain in the invoice module unless the team explicitly agrees otherwise.
+
+Required screens:
+1. Supplier List
+2. Add/Edit Supplier
+3. Supplier Detail
+4. Purchase Order List
+5. Create Purchase Order
+6. Purchase Order Detail
+7. Goods Receipt
+
+============================================================
+7. INVENTORY, BATCHES AND STOCK LEDGER
+============================================================
+
+- View current stock by medicine.
+- Maintain batch-level quantities and expiry details where recorded.
+- Record stock additions and deductions from approved transactions.
+- Maintain a history of stock movements.
+- Receive stock movements from confirmed purchase receipts.
+- Receive stock deductions from confirmed outward sales.
+- Support stock lookup and quantity validation.
+- Show related batch and stock history when available.
+
+Rules:
+- The inventory ledger is the source of truth for stock balances.
+- Do not independently modify a displayed stock balance without a corresponding validated stock movement.
+- Stock movements must be traceable to their source transaction.
+- Posted stock movements should not be silently edited; corrections should follow an explicit adjustment/reversal process agreed by the team.
+
+============================================================
+8. EXPIRY, LOW-STOCK ALERTS AND RECONCILIATION
+============================================================
+
+- Identify medicines that are approaching expiry or already expired.
+- Highlight medicines below their configured stock threshold.
+- Show the affected medicine and batch details where available.
+- Help staff identify discrepancies between recorded and counted stock.
+- Provide a stock reconciliation workflow based on the team's approved inventory rules.
+- Record approved adjustments as traceable stock movements.
+
+============================================================
+9. OUTWARD SALES REPORT SCANNING (MODULE 8)
+============================================================
+
+- Capture a sales report using the phone camera or upload an image/PDF.
+- Extract report lines, including medicine name, quantity, date, and batch number when present.
+- Match extracted lines to catalogue medicines.
+- Match using product ID or exact name first, followed by fuzzy name matching where appropriate.
+- Show a confidence indicator or otherwise clearly identify uncertain matches.
+- Allow staff to edit extracted lines and manually resolve unmatched medicines.
+- Handle loose-tablet sales using the catalogue's unit conversion rules.
+- Show a review and confirmation summary before posting.
+- Prevent duplicate report imports using the report date and report reference.
+- Maintain imported report history with statuses such as posted, pending review, and rejected.
+- Show report details and the stock deductions caused by a posted report.
+
+Rules:
+- Scanning proposes data; a person must review and confirm it.
+- Do not post sales or deduct stock before explicit confirmation and successful posting.
+- If a report does not contain batch numbers, the batch deduction rule must be agreed with the inventory module owner.
+- OCR/extraction accuracy may vary by report layout, so manual correction must be supported.
+
+============================================================
+10. CUSTOMER MANAGEMENT, REFILLS AND PRESCRIPTIONS
+============================================================
+
+- Create and maintain customer records.
+- View customer-related history where recorded.
+- Track refill dates and reminders.
+- Maintain prescription records where included in the approved requirements.
+- Show whether a refill is due or delivered.
+- Mark a refill as delivered only after explicit staff confirmation.
+
+Scope note:
+Prescription fields, retention rules, and customer-history details must follow the team's approved requirements. Do not invent additional clinical or diagnostic functionality.
+
+============================================================
+11. UDH AAR (CREDIT) AND PAYMENTS
+============================================================
+
+- Record customer credit transactions.
+- Record payments against customer accounts.
+- Show customer-wise transaction history.
+- Calculate and display outstanding balances.
+- Preserve a traceable history of credits and payments.
+
+Rules:
+- Calculate the balance from recorded transactions.
+- Do not let users directly overwrite the calculated balance without a corresponding transaction.
+
+============================================================
+12. REMINDERS AND NOTIFICATIONS
+============================================================
+
+- Notify staff about low stock, expiry, and pending actions.
+- Support agreed refill reminders.
+- Support customer communication workflows only where they are part of the approved scope.
+- WhatsApp reminders require a confirmed integration and must not be presented as available until implemented and configured.
+
+============================================================
+13. OFFLINE HANDLING AND SYNCHRONIZATION
+============================================================
+
+If offline support is included in the agreed implementation scope:
+- Show whether a transaction is saved locally, queued, synchronized, or successfully posted.
+- Queue eligible actions while the network is unavailable.
+- Retry queued actions safely when connectivity returns.
+- Prevent retries from creating duplicate transactions or stock movements.
+- Clearly distinguish a pending action from a transaction successfully posted to the backend.
+
+Scope note:
+Offline behaviour and local storage details must be confirmed by the team before implementation.
+
+============================================================
+14. FLUTTER, BACKEND API AND MONGODB RESPONSIBILITIES
+============================================================
+
+Flutter mobile app:
+- Display screens, forms, lists, filters, and details.
+- Capture images and files for invoice/sales-report scanning.
+- Display OCR results for review and correction.
+- Collect explicit confirmation before posting transactions.
+- Display loading, validation, error, offline, and success states.
+
+Backend API/service layer:
+- Authenticate requests and validate incoming data.
+- Enforce catalogue, supplier, purchase-order, goods-receipt, sales-posting, and inventory rules.
+- Coordinate OCR and medicine-matching workflows where these services are used.
+- Check for duplicate imports and duplicate posting requests.
+- Write confirmed transactions and their stock movements to MongoDB.
+- Return clear status information to Flutter.
+
+MongoDB:
+- Store medicine catalogue records and unit conversions.
+- Store suppliers and purchase orders.
+- Store goods receipts and invoice/report references.
+- Store inventory batches and stock movement records.
+- Store imported sales reports and their line items.
+- Store customer, refill, prescription, credit, and payment records where included in the approved scope.
+- Store transaction statuses and audit-related references needed to trace changes.
+
+Architecture rule:
+Flutter should communicate with the backend API rather than directly writing to MongoDB. The backend is responsible for enforcing business rules and preserving data consistency.
+
+============================================================
+15. CORE DATA AND INTEGRATION RULES
+============================================================
+
+- The medicine catalogue is the source of truth for stable product IDs and unit conversions.
+- Purchase orders and sales report lines must reference catalogue product IDs.
+- Stock balances must come from the inventory/stock ledger.
+- Creating or sending a purchase order must not change stock.
+- A confirmed and successfully posted goods receipt increases stock.
+- A confirmed and successfully posted sales report decreases stock.
+- OCR output must remain reviewable and editable before posting.
+- Duplicate invoice/report imports and duplicate posting requests must be guarded against.
+- Partial goods receipts must preserve the outstanding quantities.
+- Customer credit balances must be derived from recorded credit/payment transactions.
+- Pending offline actions must not be shown as server-posted.
+- Shared product ID and stock movement formats must be agreed upon before module integration.
+
+============================================================
+16. SUGGESTED IMPLEMENTATION ORDER
+============================================================
+
+Phase 1 - Foundation:
+- Authentication and basic shop setup.
+- Medicine catalogue, product IDs, unit conversions, and search.
+
+Phase 2 - Inventory and purchasing:
+- Inventory ledger and batch structure.
+- Supplier management, purchase orders, and goods receipts.
+
+Phase 3 - Scanning workflows:
+- Purchase invoice OCR and review.
+- Outward sales report OCR, matching, review, and posting.
+
+Phase 4 - Stock control:
+- Expiry and low-stock views.
+- Reconciliation and basic reports.
+
+Phase 5 - Supporting workflows:
+- Customers, refills, prescriptions, Udhaar, payments, and reminders, according to approved scope.
+
+Phase 6 - Reliability and integration:
+- Duplicate prevention.
+- Error handling and end-to-end testing.
+- Offline synchronization only if approved and included in the implementation plan.
+
+This is a proposed implementation sequence, not a replacement for the team's agreed project plan.
+
+============================================================
+17. OUT-OF-SCOPE UNLESS EXPLICITLY APPROVED
+============================================================
+
+Do not add the following as assumed requirements:
+- Predictive demand forecasting.
+- AI-generated purchase recommendations.
+- Multi-branch enterprise management.
+- Elaborate analytics beyond the agreed reports.
+- Unapproved third-party messaging or billing integrations.
+- Automatic posting of OCR results without user review.
+- Untraceable direct edits to stock balances or customer credit balances.
+
+============================================================
+18. ITEMS THE TEAM MUST CONFIRM
+============================================================
+
+- Final fields and permissions for each module.
+- Whether medicine strength is part of the unique catalogue identity.
+- Which roles can create or edit catalogue records.
+- Whether sent purchase orders can only be changed by cancellation and reissue.
+- Which tax calculations belong to the invoice module.
+- The actual invoice and sales-report formats to be scanned.
+- The batch deduction rule when sales reports do not include batch numbers.
+- The exact stock movement data contract shared between modules.
+- Whether offline mode is part of the first release.
+- The precise customer, prescription, refill, credit, reminder, and notification scope.
+
+END OF FEATURE REQUIREMENTS

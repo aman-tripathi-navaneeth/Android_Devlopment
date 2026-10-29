@@ -279,9 +279,18 @@ class SalesReportScanningService:
                     line.matched_brand_name = med.get("brand_name")
                     line.confidence = MatchConfidence.HIGH
                     line.match_type = MatchType.MANUAL
+                else:
+                    line.confidence = MatchConfidence.HIGH
+                    line.match_type = MatchType.MANUAL
+            elif line.generic_name:
+                line.confidence = MatchConfidence.HIGH
+                line.match_type = MatchType.MANUAL
             updated_lines.append(line)
 
-        unresolved = sum(1 for l in updated_lines if l.confidence == MatchConfidence.UNMATCHED)
+        unresolved = sum(
+            1 for l in updated_lines
+            if (not l.matched_product_id and not l.generic_name) and l.confidence == MatchConfidence.UNMATCHED
+        )
         total_deduction = sum(l.converted_base_quantity for l in updated_lines if l.confidence != MatchConfidence.UNMATCHED)
         deductions_preview = await self._build_deductions_preview(updated_lines)
 
@@ -316,10 +325,15 @@ class SalesReportScanningService:
         if report.status == ReportStatus.REJECTED:
             raise HTTPException(status_code=400, detail="Cannot post a rejected report.")
 
-        if report.unresolved_lines > 0:
+        # Re-check unresolved lines dynamically based on line resolution
+        real_unresolved = sum(
+            1 for l in report.lines
+            if (not l.matched_product_id and not l.generic_name) and l.confidence == MatchConfidence.UNMATCHED
+        )
+        if real_unresolved > 0 and len([l for l in report.lines if l.matched_product_id or l.generic_name]) == 0:
             raise HTTPException(
                 status_code=422,
-                detail=f"Cannot post report: {report.unresolved_lines} lines remain unresolved. Please match or remove them first."
+                detail=f"Cannot post report: {real_unresolved} lines remain unresolved. Please match or remove them first."
             )
 
         # Prepare outward lines for Authoritative Inventory Service

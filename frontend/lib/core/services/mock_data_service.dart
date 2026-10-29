@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../models/supplier.dart';
@@ -15,7 +15,7 @@ class MockDataService extends ChangeNotifier {
   static final MockDataService _instance = MockDataService._internal();
   factory MockDataService() => _instance;
   MockDataService._internal() {
-    // Synchronize catalogue from the backend database so medicines persist across browser reloads
+    _initSeedData();
     syncFromBackend();
   }
 
@@ -26,13 +26,71 @@ class MockDataService extends ChangeNotifier {
     if (_isLoadingFromBackend) return;
     _isLoadingFromBackend = true;
     try {
+      await Future.wait([
+        syncProductsFromBackend(),
+        syncSuppliersFromBackend(),
+      ]);
+    } catch (_) {
+    } finally {
+      _isLoadingFromBackend = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> syncSuppliersFromBackend() async {
+    try {
+      final api = ApiClient();
+      final list = await api.getSuppliers(storeId: 'main_store');
+      if (list.isNotEmpty) {
+        final List<Supplier> loaded = [];
+        for (final s in list) {
+          final id = s['id']?.toString() ?? '';
+          if (id.isEmpty) continue;
+          final code = s['code']?.toString() ?? s['supplier_code']?.toString() ?? 'SUP-000000';
+          final name = s['name']?.toString() ?? '';
+          final contact = s['contact_person']?.toString() ?? s['contactPerson']?.toString();
+          final phone = s['phone']?.toString() ?? '';
+          final email = s['email']?.toString();
+          final address = s['address']?.toString();
+          final city = s['city']?.toString();
+          final gst = s['gst_number']?.toString() ?? s['gstNumber']?.toString();
+          final paymentTerms = s['payment_terms']?.toString() ?? s['paymentTerms']?.toString() ?? 'Net 30';
+          final notes = s['notes']?.toString();
+          final active = s['active'] is bool ? s['active'] as bool : (s['isActive'] as bool? ?? true);
+          loaded.add(
+            Supplier(
+              id: id,
+              supplierCode: code,
+              name: name,
+              contactPerson: contact,
+              phone: phone,
+              email: email,
+              address: address,
+              city: city,
+              gstNumber: gst,
+              paymentTerms: paymentTerms,
+              notes: notes,
+              isActive: active,
+            ),
+          );
+        }
+        if (loaded.isNotEmpty) {
+          _suppliers.clear();
+          _suppliers.addAll(loaded);
+          notifyListeners();
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> syncProductsFromBackend() async {
+    try {
       final api = ApiClient();
       final products = await api.getProducts(limit: 200);
       if (products.isNotEmpty) {
-        final List<Medicine> loaded = [];
-        for (final p in products) {
+        final loaded = await Future.wait(products.map((p) async {
           final id = p['id']?.toString() ?? '';
-          if (id.isEmpty) continue;
+          if (id.isEmpty) return null;
           final brandName = p['brand_name']?.toString() ?? '';
           final genericName = p['generic_name']?.toString() ?? brandName;
           final manufacturer = p['manufacturer']?.toString() ?? '';
@@ -54,7 +112,6 @@ class MockDataService extends ChangeNotifier {
             }
           }
 
-          // Fetch real stock balance & batches for this product from the backend
           int currentStock = 0;
           List<MedicineBatch> batches = [];
           try {
@@ -96,37 +153,32 @@ class MockDataService extends ChangeNotifier {
             }
           } catch (_) {}
 
-          loaded.add(
-            Medicine(
-              productId: id,
-              name: brandName,
-              genericName: genericName,
-              strength: strength,
-              form: form,
-              category: category,
-              manufacturer: manufacturer,
-              packUnit: packUnit,
-              saleUnit: baseUnit,
-              unitsPerPack: unitsPerPack,
-              currentStock: currentStock,
-              lowStockThreshold: 20,
-              isActive: p['status']?.toString().toLowerCase() != 'inactive',
-              batches: batches,
-            ),
+          return Medicine(
+            productId: id,
+            name: brandName,
+            genericName: genericName,
+            strength: strength,
+            form: form,
+            category: category,
+            manufacturer: manufacturer,
+            packUnit: packUnit,
+            saleUnit: baseUnit,
+            unitsPerPack: unitsPerPack,
+            currentStock: currentStock,
+            lowStockThreshold: 20,
+            isActive: p['status']?.toString().toLowerCase() != 'inactive',
+            batches: batches,
           );
-        }
+        }));
 
-        if (loaded.isNotEmpty) {
+        final validMeds = loaded.whereType<Medicine>().toList();
+        if (validMeds.isNotEmpty) {
           _medicines.clear();
-          _medicines.addAll(loaded);
+          _medicines.addAll(validMeds);
           notifyListeners();
         }
       }
-    } catch (_) {
-      // Gracefully continue if backend offline
-    } finally {
-      _isLoadingFromBackend = false;
-    }
+    } catch (_) {}
   }
 
   // Collections
@@ -144,565 +196,18 @@ class MockDataService extends ChangeNotifier {
       List.unmodifiable(_stockMovements);
 
   void _initSeedData() {
-    // 1. SEED SUPPLIERS
-    _suppliers.addAll([
-      const Supplier(
-        id: 'sup-1',
-        supplierCode: 'SUP-000001',
-        name: 'Sri Venkateswara Pharma Distributors',
-        contactPerson: 'K. Ramesh',
-        phone: '9848012345',
-        email: 'ramesh@venkateswarapharma.in',
-        address: 'Shop 14, Main Road, Governorpet, Vijayawada, AP',
-        gstNumber: '37AAAAA0000A1Z5',
-        paymentTerms: 'Net 30',
-        isActive: true,
-        openPurchaseOrderCount: 2,
-        totalOrderValue: 145000.00,
-        outstandingUnits: 120,
-      ),
-      const Supplier(
-        id: 'sup-2',
-        supplierCode: 'SUP-000002',
-        name: 'Apollo Med Wholesale Agency',
-        contactPerson: 'V. Suresh Kumar',
-        phone: '9440167890',
-        email: 'orders@apollomedwholesale.com',
-        address: 'Plot 42, IDA Mallapur, Hyderabad, TS',
-        gstNumber: '36BBBBB1111B2Z4',
-        paymentTerms: 'Net 15',
-        isActive: true,
-        openPurchaseOrderCount: 1,
-        totalOrderValue: 88500.00,
-        outstandingUnits: 45,
-      ),
-      const Supplier(
-        id: 'sup-3',
-        supplierCode: 'SUP-000003',
-        name: 'Balaji Drug Agencies',
-        contactPerson: 'M. Srinivas',
-        phone: '9885054321',
-        email: 'balajidrugs@gmail.com',
-        address: 'Brodipet 4th Lane, Guntur, AP',
-        gstNumber: '37CCCCC2222C3Z3',
-        paymentTerms: 'Net 21',
-        isActive: true,
-        openPurchaseOrderCount: 0,
-        totalOrderValue: 32000.00,
-        outstandingUnits: 0,
-      ),
-      const Supplier(
-        id: 'sup-4',
-        supplierCode: 'SUP-000004',
-        name: 'Reddy & Sons Pharmaceuticals',
-        contactPerson: 'P. Venkat Reddy',
-        phone: '9700098765',
-        email: 'reddysons@pharma.biz',
-        address: 'Daba Gardens, Visakhapatnam, AP',
-        gstNumber: '37DDDDD3333D4Z2',
-        paymentTerms: 'Immediate',
-        isActive: false, // Inactive test case
-        openPurchaseOrderCount: 0,
-        totalOrderValue: 54000.00,
-        outstandingUnits: 0,
-      ),
-    ]);
-
-    // 2. SEED MEDICINES WITH BATCH BREAKDOWNS (Catalogue & Inventory)
-    final now = DateTime.now();
-    _medicines.addAll([
-      Medicine(
-        productId: 'MED-000101',
-        name: 'Dolo 650mg',
-        genericName: 'Paracetamol',
-        strength: '650mg',
-        form: 'Tablet',
-        category: 'Analgesic & Antipyretic',
-        manufacturer: 'Micro Labs Ltd',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 15,
-        currentStock: 180,
-        lowStockThreshold: 50,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'DL-91',
-            expiryDate: DateTime(now.year + 2, 12, 31),
-            quantity: 120,
-            supplierName: 'Sri Venkateswara Pharma',
-            purchaseReceiptRef: 'GRN-2026-000001',
-            purchaseRate: 32.50,
-          ),
-          MedicineBatch(
-            batchNumber: 'DL-84',
-            expiryDate: now.add(
-              const Duration(days: 35),
-            ), // Near Expiry (< 90 days)
-            quantity: 60,
-            supplierName: 'Balaji Drug Agencies',
-            purchaseReceiptRef: 'GRN-2026-000002',
-            purchaseRate: 31.00,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000102',
-        name: 'Augmentin 625 Duo',
-        genericName: 'Amoxicillin & Potassium Clavulanate',
-        strength: '625mg',
-        form: 'Tablet',
-        category: 'Antibiotic',
-        manufacturer: 'GSK Pharmaceuticals',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 10,
-        currentStock: 25, // Low stock test case
-        lowStockThreshold: 30,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'AG-84',
-            expiryDate: DateTime(now.year + 1, 9, 30),
-            quantity: 25,
-            supplierName: 'Apollo Med Wholesale',
-            purchaseReceiptRef: 'GRN-2026-000003',
-            purchaseRate: 175.00,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000103',
-        name: 'Pan 40',
-        genericName: 'Pantoprazole Gastro-resistant',
-        strength: '40mg',
-        form: 'Tablet',
-        category: 'Antacid / PPI',
-        manufacturer: 'Alkem Laboratories',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 15,
-        currentStock: 95,
-        lowStockThreshold: 20,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'PN-2024-8',
-            expiryDate: DateTime(now.year + 2, 6, 30),
-            quantity: 95,
-            supplierName: 'Sri Venkateswara Pharma',
-            purchaseReceiptRef: 'GRN-2026-000001',
-            purchaseRate: 64.00,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000104',
-        name: 'Azee 500',
-        genericName: 'Azithromycin',
-        strength: '500mg',
-        form: 'Tablet',
-        category: 'Antibiotic',
-        manufacturer: 'Cipla Ltd',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 5,
-        currentStock: 12, // Low stock test case
-        lowStockThreshold: 25,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'AZ-12',
-            expiryDate: now.add(
-              const Duration(days: 15),
-            ), // Critical Expiry (< 30 days)
-            quantity: 12,
-            supplierName: 'Apollo Med Wholesale',
-            purchaseReceiptRef: 'GRN-2026-000004',
-            purchaseRate: 95.00,
-          ),
-          MedicineBatch(
-            batchNumber: 'AZ-09',
-            expiryDate: now.subtract(const Duration(days: 45)), // Expired batch
-            quantity: 0,
-            supplierName: 'Apollo Med Wholesale',
-            purchaseReceiptRef: 'GRN-2025-000892',
-            purchaseRate: 92.00,
-            isQuarantined: true,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000105',
-        name: 'Glycomet 500',
-        genericName: 'Metformin Hydrochloride',
-        strength: '500mg',
-        form: 'Tablet',
-        category: 'Anti-diabetic',
-        manufacturer: 'USV Ltd',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 20,
-        currentStock: 240,
-        lowStockThreshold: 40,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'GL-2025',
-            expiryDate: DateTime(now.year + 3, 3, 31),
-            quantity: 240,
-            supplierName: 'Balaji Drug Agencies',
-            purchaseReceiptRef: 'GRN-2026-000005',
-            purchaseRate: 28.00,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000106',
-        name: 'Telma 40',
-        genericName: 'Telmisartan',
-        strength: '40mg',
-        form: 'Tablet',
-        category: 'Anti-hypertensive',
-        manufacturer: 'Glenmark Pharmaceuticals',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 15,
-        currentStock: 60,
-        lowStockThreshold: 30,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'TL-401',
-            expiryDate: DateTime(now.year + 1, 11, 30),
-            quantity: 60,
-            supplierName: 'Sri Venkateswara Pharma',
-            purchaseReceiptRef: 'GRN-2026-000001',
-            purchaseRate: 85.00,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000107',
-        name: 'Cotton roll',
-        genericName: 'Absorbent Surgical Cotton',
-        strength: '500g',
-        form: MedicineForms.other,
-        category: MedicineCategories.clinic,
-        manufacturer: 'Sample Surgicals',
-        packUnit: 'pack',
-        saleUnit: 'piece',
-        unitsPerPack: 1,
-        currentStock: 40,
-        lowStockThreshold: 10,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'CR-24',
-            expiryDate: DateTime(now.year + 3, 1, 1),
-            quantity: 40,
-            supplierName: 'Balaji Drug Agencies',
-            purchaseReceiptRef: 'GRN-2026-000006',
-            purchaseRate: 95.00,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000108',
-        name: 'Betadine 10%',
-        genericName: 'Povidone Iodine',
-        strength: '10%',
-        form: MedicineForms.tube,
-        category: MedicineCategories.derma,
-        manufacturer: 'Win-Medicare',
-        packUnit: 'box',
-        saleUnit: 'tube',
-        unitsPerPack: 1,
-        currentStock: 0,
-        lowStockThreshold: 15,
-        isActive: false, // Inactive deactivation test case matching other team's seeds
-      ),
-      Medicine(
-        productId: 'MED-000109',
-        name: 'Dettol Antiseptic Liquid',
-        genericName: 'Chloroxylenol',
-        strength: '250ml',
-        form: MedicineForms.bottle,
-        category: MedicineCategories.personalCare,
-        manufacturer: 'Reckitt Benckiser',
-        packUnit: 'case',
-        saleUnit: 'bottle',
-        unitsPerPack: 12,
-        currentStock: 36,
-        lowStockThreshold: 12,
-      ),
-      Medicine(
-        productId: 'MED-000110',
-        name: 'Ensure Diabetes Care',
-        genericName: 'Nutritional Powder',
-        strength: '400g',
-        form: MedicineForms.bottle,
-        category: MedicineCategories.food,
-        manufacturer: 'Abbott Healthcare',
-        packUnit: 'carton',
-        saleUnit: 'tin',
-        unitsPerPack: 6,
-        currentStock: 18,
-        lowStockThreshold: 6,
-      ),
-      Medicine(
-        productId: 'MED-000111',
-        name: 'Stayfree Secure Cottony',
-        genericName: 'Sanitary Napkins',
-        strength: 'Extra Large',
-        form: MedicineForms.other,
-        category: MedicineCategories.sanitary,
-        manufacturer: 'Johnson & Johnson',
-        packUnit: 'case',
-        saleUnit: 'pack',
-        unitsPerPack: 24,
-        currentStock: 48,
-        lowStockThreshold: 12,
-      ),
-      Medicine(
-        productId: 'MED-000456',
-        name: 'Crocin 500 Advance',
-        genericName: 'Paracetamol',
-        strength: '500mg',
-        form: MedicineForms.tablet,
-        category: MedicineCategories.medicine,
-        manufacturer: 'GlaxoSmithKline',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 15,
-        currentStock: 60,
-        lowStockThreshold: 20,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'CR-2024',
-            expiryDate: DateTime(now.year + 2, 8, 31),
-            quantity: 60,
-            supplierName: 'Balaji Drug Agencies',
-            purchaseReceiptRef: 'GRN-2026-000007',
-            purchaseRate: 29.50,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000112',
-        name: 'Amoxil 500',
-        genericName: 'Amoxicillin',
-        strength: '500mg',
-        form: MedicineForms.tablet,
-        category: MedicineCategories.medicine,
-        manufacturer: 'GSK',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 10,
-        currentStock: 80,
-        lowStockThreshold: 25,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'AM-01',
-            expiryDate: DateTime(now.year + 2, 5, 31),
-            quantity: 80,
-            supplierName: 'Apollo Med Wholesale',
-            purchaseReceiptRef: 'GRN-2026-000008',
-            purchaseRate: 85.00,
-          ),
-        ],
-      ),
-      Medicine(
-        productId: 'MED-000113',
-        name: 'Cetzine 10mg',
-        genericName: 'Cetirizine',
-        strength: '10mg',
-        form: MedicineForms.tablet,
-        category: MedicineCategories.medicine,
-        manufacturer: 'Dr Reddy',
-        packUnit: 'strip',
-        saleUnit: 'tablet',
-        unitsPerPack: 10,
-        currentStock: 100,
-        lowStockThreshold: 30,
-        batches: [
-          MedicineBatch(
-            batchNumber: 'CT-01',
-            expiryDate: DateTime(now.year + 2, 10, 31),
-            quantity: 100,
-            supplierName: 'Sri Venkateswara Pharma',
-            purchaseReceiptRef: 'GRN-2026-000009',
-            purchaseRate: 42.00,
-          ),
-        ],
-      ),
-    ]);
-
-    // 3. SEED PURCHASE ORDERS
-    _purchaseOrders.addAll([
-      PurchaseOrder(
-        id: 'po-1',
-        purchaseOrderNumber: 'PO-2026-000101',
-        supplierId: 'sup-1',
-        supplierName: 'Sri Venkateswara Pharma Distributors',
-        createdAt: now.subtract(const Duration(days: 3)),
-        status: POStatus.sent,
-        sentAt: now.subtract(const Duration(days: 3)),
-        items: const [
-          POLineItem(
-            lineId: 'line-1',
-            productId: 'MED-000101',
-            productName: 'Dolo 650mg',
-            unitOfPurchase: 'strip',
-            orderedQuantity: 200,
-            expectedRate: 30.50,
-            receivedQuantity: 0,
-          ),
-          POLineItem(
-            lineId: 'line-2',
-            productId: 'MED-000103',
-            productName: 'Pan 40',
-            unitOfPurchase: 'strip',
-            orderedQuantity: 50,
-            expectedRate: 62.00,
-            receivedQuantity: 0,
-          ),
-        ],
-      ),
-      PurchaseOrder(
-        id: 'po-2',
-        purchaseOrderNumber: 'PO-2026-000102',
-        supplierId: 'sup-2',
-        supplierName: 'Apollo Med Wholesale Agency',
-        createdAt: now.subtract(const Duration(days: 6)),
-        status: POStatus.partiallyReceived,
-        sentAt: now.subtract(const Duration(days: 5)),
-        items: const [
-          POLineItem(
-            lineId: 'line-3',
-            productId: 'MED-000102',
-            productName: 'Augmentin 625 Duo',
-            unitOfPurchase: 'strip',
-            orderedQuantity: 100,
-            expectedRate: 170.00,
-            receivedQuantity: 60,
-          ),
-          POLineItem(
-            lineId: 'line-4',
-            productId: 'MED-000104',
-            productName: 'Azee 500',
-            unitOfPurchase: 'strip',
-            orderedQuantity: 50,
-            expectedRate: 90.00,
-            receivedQuantity: 20,
-          ),
-        ],
-      ),
-      PurchaseOrder(
-        id: 'po-3',
-        purchaseOrderNumber: 'PO-2026-000103',
-        supplierId: 'sup-3',
-        supplierName: 'Balaji Drug Agencies',
-        createdAt: now.subtract(const Duration(hours: 4)),
-        status: POStatus.draft,
-        items: const [
-          POLineItem(
-            lineId: 'line-5',
-            productId: 'MED-000105',
-            productName: 'Glycomet 500',
-            unitOfPurchase: 'strip',
-            orderedQuantity: 150,
-            expectedRate: 26.00,
-            receivedQuantity: 0,
-          ),
-        ],
-      ),
-    ]);
-
-    // 4. SEED CUSTOMERS & UDHAAR LEDGERS
-    _customers.addAll([
-      Customer(
-        id: 'cust-1',
-        name: 'G. Satyanarayana',
-        phone: '9848123456',
-        address: 'Main Road, Governorpet',
-        refillDueMedicine: 'Telma 40',
-        refillDueDate: now.add(const Duration(days: 3)),
-        prescriptionsCount: 2,
-        entries: [
-          UdhaarEntry(
-            id: 'ent-1',
-            type: UdhaarEntryType.credit,
-            amountPaise: 45000, // ₹450.00
-            date: now.subtract(const Duration(days: 3)),
-            note: 'Antibiotic course (Augmentin & Dolo)',
-            recordedBy: 'Aditya (Pharmacist)',
-          ),
-        ],
-      ),
-      Customer(
-        id: 'cust-2',
-        name: 'K. Lakshmi Devi',
-        phone: '9440987654',
-        address: 'Brodipet, Guntur',
-        refillDueMedicine: 'Glycomet 500',
-        refillDueDate: now.subtract(const Duration(days: 2)), // Overdue
-        prescriptionsCount: 1,
-        entries: [
-          UdhaarEntry(
-            id: 'ent-2',
-            type: UdhaarEntryType.credit,
-            amountPaise: 150000, // ₹1,500.00
-            date: now.subtract(const Duration(days: 12)),
-            note: 'Monthly BP & Diabetes medicines',
-            recordedBy: 'Staff',
-          ),
-          UdhaarEntry(
-            id: 'ent-3',
-            type: UdhaarEntryType.payment,
-            amountPaise: 30000, // ₹300.00 paid
-            date: now.subtract(const Duration(days: 5)),
-            note: 'Cash payment at counter',
-            paymentMethod: 'CASH',
-            recordedBy: 'Aditya (Pharmacist)',
-          ),
-        ],
-      ),
-      Customer(
-        id: 'cust-3',
-        name: 'P. Srinivasa Rao',
-        phone: '9988776655',
-        address: 'Ring Road, Vijayawada',
-        prescriptionsCount: 3,
-        entries: const [],
-      ),
-    ]);
-
-    // 5. SEED INITIAL STOCK MOVEMENTS
-    _stockMovements.addAll([
-      {
-        'movementId': 'SM-1001',
-        'productId': 'MED-000101',
-        'productName': 'Dolo 650mg',
-        'batchNumber': 'DL-91',
-        'type': 'GOODS_RECEIPT',
-        'quantity': 120,
-        'resultingBalance': 180,
-        'sourceRef': 'GRN-2026-000001',
-        'authorizedBy': 'Aditya (Pharmacist)',
-        'timestamp': now.subtract(const Duration(days: 1)),
-      },
-      {
-        'movementId': 'SM-1002',
-        'productId': 'MED-000101',
-        'productName': 'Dolo 650mg',
-        'batchNumber': 'DL-91',
-        'type': 'SALES_DEDUCT',
-        'quantity': 5,
-        'resultingBalance': 175,
-        'sourceRef': 'REPORT-2026-10-12',
-        'authorizedBy': 'Staff',
-        'timestamp': now.subtract(const Duration(hours: 18)),
-      },
-    ]);
+    // All data is loaded from the backend PostgreSQL via syncFromBackend().
+    // No static seed data is used.
   }
 
   // --- SUPPLIER OPERATIONS ---
   void addSupplier(Supplier supplier) {
-    _suppliers.insert(0, supplier);
+    final index = _suppliers.indexWhere((s) => s.id == supplier.id || s.supplierCode == supplier.supplierCode);
+    if (index != -1) {
+      _suppliers[index] = supplier;
+    } else {
+      _suppliers.insert(0, supplier);
+    }
     notifyListeners();
   }
 
@@ -710,13 +215,20 @@ class MockDataService extends ChangeNotifier {
     final index = _suppliers.indexWhere((s) => s.id == updated.id);
     if (index != -1) {
       _suppliers[index] = updated;
-      notifyListeners();
+    } else {
+      _suppliers.insert(0, updated);
     }
+    notifyListeners();
   }
 
   // --- MEDICINE OPERATIONS ---
   void addMedicine(Medicine medicine) {
-    _medicines.insert(0, medicine);
+    final index = _medicines.indexWhere((m) => m.productId == medicine.productId);
+    if (index != -1) {
+      _medicines[index] = medicine;
+    } else {
+      _medicines.insert(0, medicine);
+    }
     notifyListeners();
   }
 
@@ -726,8 +238,10 @@ class MockDataService extends ChangeNotifier {
     );
     if (index != -1) {
       _medicines[index] = updated;
-      notifyListeners();
+    } else {
+      _medicines.insert(0, updated);
     }
+    notifyListeners();
   }
 
   void toggleMedicineActive(String productId, bool isActive) {

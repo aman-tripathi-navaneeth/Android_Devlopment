@@ -68,9 +68,9 @@ void main() {
     expect(find.text('Stock In'), findsOneWidget);
     expect(find.text('Scan a supplier invoice to add received stock.'), findsOneWidget);
 
-    // Option B: Sales Report (Stock Out)
+    // Option B: Sales Report (Stock Out) & Manual Transaction
     expect(find.text('Sales Report'), findsOneWidget);
-    expect(find.text('Stock Out'), findsOneWidget);
+    expect(find.text('Stock Out'), findsNWidgets(2));
     expect(find.text('Scan a sales report to record sold medicines.'), findsOneWidget);
 
     // 6. Test Option A: Purchase Invoice workflow -> Camera Viewfinder

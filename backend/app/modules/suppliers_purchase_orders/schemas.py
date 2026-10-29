@@ -18,10 +18,12 @@ class PurchaseOrderStatus(str, Enum):
 
 class SupplierBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=120, description="Supplier / distributor business name")
-    contact_person: str = Field(..., min_length=2, max_length=80, description="Primary representative")
+    contact_person: Optional[str] = Field(None, max_length=80, description="Primary representative")
     phone: str = Field(..., min_length=10, max_length=15, description="Contact phone number")
     email: Optional[str] = Field(None, max_length=120)
     address: Optional[str] = Field(None, max_length=255)
+    city: Optional[str] = Field(None, max_length=100)
+    gst_number: Optional[str] = Field(None, max_length=30)
     payment_terms: str = Field("Net 30", max_length=50, description="e.g. Net 15, Net 30, Immediate")
     notes: Optional[str] = Field(None, max_length=500)
 
@@ -32,10 +34,12 @@ class SupplierCreate(SupplierBase):
 
 class SupplierUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=120)
-    contact_person: Optional[str] = Field(None, min_length=2, max_length=80)
+    contact_person: Optional[str] = Field(None, max_length=80)
     phone: Optional[str] = Field(None, min_length=10, max_length=15)
     email: Optional[str] = None
     address: Optional[str] = None
+    city: Optional[str] = None
+    gst_number: Optional[str] = None
     payment_terms: Optional[str] = None
     notes: Optional[str] = None
     active: Optional[bool] = None

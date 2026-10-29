@@ -36,4 +36,10 @@ build/
 .pub/
 frontend/build/
 *.log
+backend/data/
 
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo

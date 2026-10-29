@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/api/api_client.dart';
 import '../../../core/theme/colors.dart';
 import '../../../core/services/mock_data_service.dart';
 import '../../../core/localization/app_localizations.dart';
@@ -25,6 +26,12 @@ class SupplierListScreen extends StatefulWidget {
 class _SupplierListScreenState extends State<SupplierListScreen> {
   String _searchQuery = '';
   SupplierFilter _currentFilter = SupplierFilter.all;
+
+  @override
+  void initState() {
+    super.initState();
+    MockDataService().syncSuppliersFromBackend();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,86 +111,98 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
                 ),
                 const SizedBox(height: 12),
                 Expanded(
-                  child: suppliers.isEmpty
-                      ? EmptyState(
-                          icon: Icons.local_shipping_outlined,
-                          title: strings.noSuppliersYet,
-                          actionLabel: strings.addSupplier,
-                          onAction: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const SupplierFormScreen(),
-                              ),
-                            );
-                          },
-                        )
-                      : ListView.separated(
-                          itemCount: suppliers.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final supplier = suppliers[index];
-                            return EntityCard(
-                              title: supplier.name,
-                              leadingText: supplier.name.isNotEmpty
-                                  ? supplier.name.substring(0, 1).toUpperCase()
-                                  : 'S',
-                              subtitle1:
-                                  '${supplier.supplierCode} • ${supplier.contactPerson ?? '-'}',
-                              subtitle2:
-                                  'Phone: ${supplier.phone} • Terms: ${supplier.paymentTerms ?? 'Net 30'}',
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  StatusChip(
-                                    status: supplier.isActive
-                                        ? StatusType.active
-                                        : StatusType.inactive,
-                                    customLabel: supplier.isActive
-                                        ? strings.active
-                                        : strings.inactive,
-                                  ),
-                                  PopupMenuButton<String>(
-                                    icon: const Icon(
-                                      Icons.more_vert_rounded,
-                                      size: 18,
-                                      color: AppColors.inkSoft,
+                  child: RefreshIndicator(
+                    onRefresh: () => MockDataService().syncSuppliersFromBackend(),
+                    child: suppliers.isEmpty
+                        ? ListView(
+                            children: [
+                              EmptyState(
+                                icon: Icons.local_shipping_outlined,
+                                title: strings.noSuppliersYet,
+                                actionLabel: strings.addSupplier,
+                                onAction: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => const SupplierFormScreen(),
                                     ),
-                                    padding: EdgeInsets.zero,
-                                    onSelected: (action) async {
-                                      if (action == 'edit') {
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => SupplierFormScreen(
-                                              supplierToEdit: supplier,
+                                  );
+                                },
+                              ),
+                            ],
+                          )
+                        : ListView.separated(
+                            itemCount: suppliers.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final supplier = suppliers[index];
+                              return EntityCard(
+                                title: supplier.name,
+                                leadingText: supplier.name.isNotEmpty
+                                    ? supplier.name.substring(0, 1).toUpperCase()
+                                    : 'S',
+                                subtitle1:
+                                    '${supplier.supplierCode} • ${supplier.contactPerson ?? '-'}',
+                                subtitle2:
+                                    'Phone: ${supplier.phone} • Terms: ${supplier.paymentTerms ?? 'Net 30'}',
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    StatusChip(
+                                      status: supplier.isActive
+                                          ? StatusType.active
+                                          : StatusType.inactive,
+                                      customLabel: supplier.isActive
+                                          ? strings.active
+                                          : strings.inactive,
+                                    ),
+                                    PopupMenuButton<String>(
+                                      icon: const Icon(
+                                        Icons.more_vert_rounded,
+                                        size: 18,
+                                        color: AppColors.inkSoft,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      onSelected: (action) async {
+                                        if (action == 'edit') {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) => SupplierFormScreen(
+                                                supplierToEdit: supplier,
+                                              ),
                                             ),
-                                          ),
-                                        );
-                                      } else if (action == 'toggle') {
-                                        final willDeactivate =
-                                            supplier.isActive;
-                                        final confirmed = await ConfirmSheet.show(
-                                          context,
-                                          title: willDeactivate
-                                              ? strings.deactivate
-                                              : strings.reactivate,
-                                          message: willDeactivate
-                                              ? 'Are you sure you want to deactivate ${supplier.name}? This supplier has ${supplier.openPurchaseOrderCount} open purchase orders.'
-                                              : 'Reactivate ${supplier.name} for creating new purchase orders?',
-                                          isDestructive: willDeactivate,
-                                          confirmLabel: willDeactivate
-                                              ? strings.deactivate
-                                              : strings.reactivate,
-                                          cancelLabel: strings.cancel,
-                                        );
-                                        if (confirmed == true) {
-                                          service.toggleSupplierStatus(
-                                            supplier.id,
                                           );
+                                        } else if (action == 'toggle') {
+                                          final willDeactivate =
+                                              supplier.isActive;
+                                          final confirmed = await ConfirmSheet.show(
+                                            context,
+                                            title: willDeactivate
+                                                ? strings.deactivate
+                                                : strings.reactivate,
+                                            message: willDeactivate
+                                                ? 'Are you sure you want to deactivate ${supplier.name}? This supplier has ${supplier.openPurchaseOrderCount} open purchase orders.'
+                                                : 'Reactivate ${supplier.name} for creating new purchase orders?',
+                                            isDestructive: willDeactivate,
+                                            confirmLabel: willDeactivate
+                                                ? strings.deactivate
+                                                : strings.reactivate,
+                                            cancelLabel: strings.cancel,
+                                          );
+                                          if (confirmed == true) {
+                                            service.toggleSupplierStatus(
+                                              supplier.id,
+                                            );
+                                            try {
+                                              await ApiClient().updateSupplierStrict(
+                                                supplierId: supplier.id,
+                                                payload: {'is_active': !willDeactivate},
+                                              );
+                                            } catch (_) {}
+                                          }
                                         }
-                                      }
-                                    },
-                                    itemBuilder: (_) => [
+                                      },
+                                      itemBuilder: (_) => [
                                       PopupMenuItem(
                                         value: 'edit',
                                         child: Text(strings.editSupplier),
@@ -212,7 +231,8 @@ class _SupplierListScreenState extends State<SupplierListScreen> {
                             );
                           },
                         ),
-                ),
+                    ),
+                  ),
               ],
             ),
           ),

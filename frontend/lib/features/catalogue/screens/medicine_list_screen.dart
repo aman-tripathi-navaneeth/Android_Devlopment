@@ -569,244 +569,61 @@ class _MedicineListScreenState extends State<MedicineListScreen> {
           ),
         ],
       ),
-      expandedContent: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      expandedContent: Row(
         children: [
-          // Unit conversion highlight
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.vanilla,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: AppColors.outline),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.sync_alt_rounded,
-                  size: 16,
-                  color: AppColors.carob,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Unit Conversion Rule: 1 ${med.packUnit} = ${med.unitsPerPack} ${med.saleUnit}s',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.carob,
-                    ),
+          Expanded(
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+              ),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        MedicineDetailScreen(productId: med.productId),
                   ),
-                ),
-                InkWell(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            MedicineDetailScreen(productId: med.productId),
-                      ),
-                    );
-                  },
-                  child: Text(
-                    'Calculator →',
-                    style: AppTypography.caption.copyWith(
-                      color: AppColors.carob,
-                      fontWeight: FontWeight.bold,
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ),
-              ],
+                );
+              },
+              child: const Text(
+                'View Details',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
           ),
-          const SizedBox(height: 12),
-
-          Text(
-            'Batch Breakdown & Expiry Details (${med.batches.length}):',
-            style: AppTypography.label.copyWith(fontWeight: FontWeight.bold),
+          const SizedBox(width: 8),
+          Expanded(
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+              ),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        AddEditMedicineScreen(medicineToEdit: med),
+                  ),
+                );
+              },
+              child: const Text(
+                'Edit Medicine',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
           ),
-          const SizedBox(height: 6),
-
-          if (med.batches.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4.0),
-              child: Text(
-                'No batches logged yet for this medicine.',
-                style: AppTypography.caption,
+          const SizedBox(width: 8),
+          Expanded(
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 8),
               ),
-            )
-          else
-            ...med.batches.map((batch) => _buildBatchRow(context, med, batch)),
-
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                  icon: const Icon(Icons.info_outline_rounded, size: 14),
-                  label: const Text(
-                    'View Details',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            MedicineDetailScreen(productId: med.productId),
-                      ),
-                    );
-                  },
-                ),
+              onPressed: () {
+                StockCountSheet.show(context, medicine: med);
+              },
+              child: const Text(
+                'Count Stock',
+                style: TextStyle(fontSize: 12),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                  icon: const Icon(Icons.edit_outlined, size: 14),
-                  label: const Text(
-                    'Edit Medicine',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            AddEditMedicineScreen(medicineToEdit: med),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                  icon: const Icon(Icons.checklist_rtl_rounded, size: 14),
-                  label: const Text(
-                    'Count Stock',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  onPressed: () {
-                    StockCountSheet.show(context, medicine: med);
-                  },
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBatchRow(
-    BuildContext context,
-    Medicine med,
-    MedicineBatch batch,
-  ) {
-    Color? badgeColor;
-    String badgeText = batch.expiryFormatted;
-
-    if (batch.isExpired) {
-      badgeColor = AppColors.dangerFg;
-      badgeText += ' (Expired)';
-    } else if (batch.isCriticalExpiry) {
-      badgeColor = AppColors.dangerFg;
-      badgeText += ' (${batch.daysUntilExpiry}d left)';
-    } else if (batch.isNearExpiry) {
-      badgeColor = AppColors.warningFg;
-      badgeText += ' (Near Expiry)';
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.outline),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    'Batch: ${batch.batchNumber}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                  if (batch.isQuarantined) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.dangerBg,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'Quarantined',
-                        style: TextStyle(
-                          fontSize: 9,
-                          color: AppColors.dangerFg,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              Text(
-                'Expiry: $badgeText',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: badgeColor ?? AppColors.inkSoft,
-                  fontWeight: badgeColor != null
-                      ? FontWeight.bold
-                      : FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-          Row(
-            children: [
-              Text(
-                '${batch.quantity} ${med.saleUnit}s',
-                style: AppTypography.tabularNumbers.copyWith(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12.5,
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(
-                  Icons.calculate_outlined,
-                  size: 16,
-                  color: AppColors.matchaDeep,
-                ),
-                tooltip: 'Count this batch',
-                onPressed: () {
-                  StockCountSheet.show(
-                    context,
-                    medicine: med,
-                    initialBatch: batch,
-                  );
-                },
-              ),
-            ],
+            ),
           ),
         ],
       ),

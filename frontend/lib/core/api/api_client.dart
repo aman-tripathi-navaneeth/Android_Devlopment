@@ -22,9 +22,18 @@ class ApiClient {
   factory ApiClient() => _instance;
   ApiClient._internal();
 
-  String _baseUrl = kIsWeb || defaultTargetPlatform != TargetPlatform.android
-      ? 'http://127.0.0.1:8000/api/v1'
-      : 'http://10.0.2.2:8000/api/v1';
+  static String _defaultBaseUrl() {
+    if (kIsWeb) {
+      // Always use localhost for web — works on both IPv4 and IPv6 in Chrome
+      return 'http://localhost:8000/api/v1';
+    }
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return 'http://10.0.2.2:8000/api/v1';
+    }
+    return 'http://127.0.0.1:8000/api/v1';
+  }
+
+  String _baseUrl = _defaultBaseUrl();
 
   final http.Client _client = http.Client();
 
@@ -35,14 +44,20 @@ class ApiClient {
   }
 
   Future<bool> isBackendReachable() async {
-    try {
-      final response = await _client
-          .get(Uri.parse('$_baseUrl/health'))
-          .timeout(const Duration(seconds: 5));
-      return response.statusCode == 200;
-    } catch (_) {
-      return false;
+    final urls = [
+      '$_baseUrl/health',
+      if (_baseUrl.contains('127.0.0.1'))
+        _baseUrl.replaceAll('127.0.0.1', 'localhost') + '/health'
+      else if (_baseUrl.contains('localhost'))
+        _baseUrl.replaceAll('localhost', '127.0.0.1') + '/health',
+    ];
+    for (final url in urls) {
+      try {
+        final response = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+        if (response.statusCode == 200) return true;
+      } catch (_) {}
     }
+    return false;
   }
 
   Future<List<Map<String, dynamic>>> getProducts({int limit = 100}) async {
@@ -99,6 +114,161 @@ class ApiClient {
     final decoded = _decodeAny(response.body);
     if (response.statusCode >= 200 && response.statusCode < 300 && decoded is Map<String, dynamic>) return decoded;
     throw ApiException(_errorMessage(decoded, response.body), statusCode: response.statusCode);
+  }
+
+  Future<List<Map<String, dynamic>>> getSuppliers({
+    String storeId = 'main_store',
+    bool activeOnly = false,
+  }) async {
+    try {
+      final response = await _client
+          .get(Uri.parse('$_baseUrl/stores/$storeId/suppliers?active_only=$activeOnly'))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = _decodeAny(response.body);
+        if (decoded is List) {
+          return decoded.whereType<Map<String, dynamic>>().toList();
+        }
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>> createSupplierStrict({
+    String storeId = 'main_store',
+    required Map<String, dynamic> payload,
+  }) {
+    return _postJson('$_baseUrl/stores/$storeId/suppliers', payload, '', timeout: const Duration(seconds: 15));
+  }
+
+  Future<Map<String, dynamic>> updateSupplierStrict({
+    String storeId = 'main_store',
+    required String supplierId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final response = await _client
+        .patch(
+          Uri.parse('$_baseUrl/stores/$storeId/suppliers/$supplierId'),
+          headers: {'content-type': 'application/json'},
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 15));
+    final decoded = _decodeAny(response.body);
+    if (response.statusCode >= 200 && response.statusCode < 300 && decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    throw ApiException(_errorMessage(decoded, response.body), statusCode: response.statusCode);
+  }
+
+  Future<Map<String, dynamic>?> getSupplier({
+    String storeId = 'main_store',
+    required String supplierId,
+  }) async {
+    try {
+      final response = await _client
+          .get(Uri.parse('$_baseUrl/stores/$storeId/suppliers/$supplierId'))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = _decodeAny(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getSalesReports({String? status}) async {
+    try {
+      final url = status != null && status.isNotEmpty
+          ? '$_baseUrl/sales-reports?status=$status'
+          : '$_baseUrl/sales-reports';
+      final response = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = _decodeAny(response.body);
+        if (decoded is List) {
+          return decoded.whereType<Map<String, dynamic>>().toList();
+        }
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> getSalesReport(String reportId) async {
+    try {
+      final response = await _client
+          .get(Uri.parse('$_baseUrl/sales-reports/$reportId'))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = _decodeAny(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Calls PUT /sales-reports/{reportId}/lines to sync resolved lines with the backend
+  Future<Map<String, dynamic>?> updateSalesReportLines({
+    required String reportId,
+    required List<Map<String, dynamic>> lines,
+  }) async {
+    try {
+      final response = await _client
+          .put(
+            Uri.parse('$_baseUrl/sales-reports/$reportId/lines'),
+            headers: {'content-type': 'application/json'},
+            body: jsonEncode({'lines': lines}),
+          )
+          .timeout(const Duration(seconds: 15));
+      final decoded = _decodeAny(response.body);
+      if (response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Calls POST /sales-reports/{reportId}/confirm-and-post which deducts stock
+  /// AND marks the backend sales report as POSTED in a single atomic operation.
+  Future<Map<String, dynamic>?> confirmSalesReport({
+    required String reportId,
+    required String idempotencyKey,
+  }) async {
+    try {
+      final response = await _client
+          .post(
+            Uri.parse('$_baseUrl/sales-reports/$reportId/confirm-and-post'),
+            headers: {
+              'content-type': 'application/json',
+              'Idempotency-Key': idempotencyKey,
+            },
+            body: '{}',
+          )
+          .timeout(const Duration(seconds: 30));
+      final decoded = _decodeAny(response.body);
+      if (response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      final msg = _errorMessage(decoded, response.body);
+      throw ApiException('Confirm sales report failed: $msg',
+          statusCode: response.statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException('Could not confirm sales report: $e');
+    }
   }
 
   Future<Map<String, dynamic>> getStockBalanceStrict({
@@ -214,29 +384,47 @@ class ApiClient {
     required String mimeType,
     required String documentType,
   }) async {
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$_baseUrl/ocr/scan-image').replace(queryParameters: {'document_type': documentType}),
-    );
-    request.files.add(http.MultipartFile.fromBytes(
-      'file',
-      imageBytes,
-      filename: fileName,
-      contentType: MediaType.parse(mimeType),
-    ));
-    try {
-      final streamed = await _client.send(request).timeout(const Duration(seconds: 75));
-      final response = await http.Response.fromStream(streamed);
-      if (response.statusCode == 201) return _decodeMap(response.body);
-      // Propagate meaningful error from backend
-      final decoded = _decodeAny(response.body);
-      final msg = _errorMessage(decoded, response.body);
-      throw ApiException('OCR failed (HTTP \${response.statusCode}): \$msg', statusCode: response.statusCode);
-    } on ApiException {
-      rethrow;
-    } catch (e) {
-      throw ApiException('Could not reach the backend OCR service: \$e');
+    final candidateBases = <String>[
+      _baseUrl,
+      if (_baseUrl.contains('127.0.0.1'))
+        _baseUrl.replaceAll('127.0.0.1', 'localhost')
+      else if (_baseUrl.contains('localhost'))
+        _baseUrl.replaceAll('localhost', '127.0.0.1'),
+    ];
+
+    ApiException? lastApiException;
+    dynamic lastNetworkException;
+
+    for (final base in candidateBases) {
+      final uri = Uri.parse('$base/ocr/scan-image').replace(queryParameters: {'document_type': documentType});
+      final request = http.MultipartRequest('POST', uri);
+      request.files.add(http.MultipartFile.fromBytes(
+        'file',
+        imageBytes,
+        filename: fileName,
+        contentType: MediaType.parse(mimeType),
+      ));
+
+      try {
+        final streamed = await _client.send(request).timeout(const Duration(seconds: 75));
+        final response = await http.Response.fromStream(streamed);
+        if (response.statusCode == 201) return _decodeMap(response.body);
+
+        final decoded = _decodeAny(response.body);
+        final msg = _errorMessage(decoded, response.body);
+        throw ApiException('OCR failed (HTTP ${response.statusCode}): $msg', statusCode: response.statusCode);
+      } on ApiException catch (e) {
+        lastApiException = e;
+        break;
+      } catch (e) {
+        lastNetworkException = e;
+      }
     }
+
+    if (lastApiException != null) {
+      throw lastApiException;
+    }
+    throw ApiException('Could not reach the backend OCR service: $lastNetworkException');
   }
 
   Map<String, dynamic> _decodeMap(String body) {

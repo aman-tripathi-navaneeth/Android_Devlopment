@@ -21,6 +21,8 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.postgres is not None:
             await app.state.postgres.close()
+            app.state.postgres = None
+            app.state.db = None
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
@@ -29,8 +31,8 @@ app.add_middleware(
     allow_origins=settings.parsed_cors_origins,
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

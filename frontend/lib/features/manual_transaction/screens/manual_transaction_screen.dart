@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/models/medicine.dart';
 import '../../../core/services/mock_data_service.dart';
 import '../../../core/theme/colors.dart';
 import '../../../core/theme/text_styles.dart';
+import '../../sales/models/sales_report.dart';
+import '../../sales/services/mock_sales_ocr_adapter.dart';
 
 /// Manual stock-out workflow: catalogue selection -> quantities -> review.
 /// Selection is keyed by the catalogue product ID, never by the display name.
@@ -20,6 +23,8 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
   final MockDataService _catalogue = MockDataService();
   final TextEditingController _searchController = TextEditingController();
   final Map<String, int> _quantities = <String, int>{};
+  final Map<String, TextEditingController> _stripControllers = <String, TextEditingController>{};
+  final Map<String, TextEditingController> _tabletControllers = <String, TextEditingController>{};
   String _query = '';
   int _step = 0;
   bool _submitting = false;
@@ -46,6 +51,12 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    for (final c in _stripControllers.values) {
+      c.dispose();
+    }
+    for (final c in _tabletControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -53,28 +64,71 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
     setState(() {
       if (_quantities.containsKey(medicine.productId)) {
         _quantities.remove(medicine.productId);
+        _stripControllers.remove(medicine.productId)?.dispose();
+        _tabletControllers.remove(medicine.productId)?.dispose();
       } else {
         _quantities[medicine.productId] = 1;
+        final factor = medicine.unitsPerPack > 0 ? medicine.unitsPerPack : 1;
+        _stripControllers[medicine.productId] =
+            TextEditingController(text: '${1 ~/ factor}');
+        _tabletControllers[medicine.productId] =
+            TextEditingController(text: '${1 % factor}');
+      }
+    });
+  }
+
+  void _onQuantityFieldChanged(Medicine medicine) {
+    final stripText = _stripControllers[medicine.productId]?.text.trim() ?? '';
+    final tabletText = _tabletControllers[medicine.productId]?.text.trim() ?? '';
+    final strips = int.tryParse(stripText) ?? 0;
+    final tablets = int.tryParse(tabletText) ?? 0;
+    final factor = medicine.unitsPerPack > 0 ? medicine.unitsPerPack : 1;
+    final total = (strips * factor) + tablets;
+
+    setState(() {
+      _quantities[medicine.productId] = total;
+      if (total > medicine.currentStock) {
+        _error = 'Requested $total ${medicine.saleUnit}s exceeds available stock of ${medicine.currentStock} for ${medicine.name}.';
+      } else {
+        _error = null;
       }
     });
   }
 
   void _next() {
     if (_selected.isEmpty) return;
-    setState(() {
+
+    for (final medicine in _selected) {
+      final current = _quantities[medicine.productId] ?? 1;
+      final factor = medicine.unitsPerPack > 0 ? medicine.unitsPerPack : 1;
+      _stripControllers.putIfAbsent(
+        medicine.productId,
+        () => TextEditingController(text: '${current ~/ factor}'),
+      );
+      _tabletControllers.putIfAbsent(
+        medicine.productId,
+        () => TextEditingController(text: '${current % factor}'),
+      );
+    }
+
+    if (_step == 1) {
       for (final medicine in _selected) {
-        _quantities.putIfAbsent(medicine.productId, () => 1);
+        final total = _quantities[medicine.productId] ?? 0;
+        if (total <= 0) {
+          setState(() => _error = 'Enter a valid quantity greater than 0 for ${medicine.name}.');
+          return;
+        }
+        if (total > medicine.currentStock) {
+          setState(() => _error = 'Requested $total ${medicine.saleUnit}s exceeds available stock (${medicine.currentStock}) for ${medicine.name}.');
+          return;
+        }
       }
+    }
+
+    setState(() {
       _step++;
       _error = null;
     });
-  }
-
-  void _changeQuantity(Medicine medicine, int delta) {
-    final current = _quantities[medicine.productId] ?? 1;
-    final next = current + delta;
-    if (next < 1 || next > medicine.currentStock) return;
-    setState(() => _quantities[medicine.productId] = next);
   }
 
   Future<void> _confirm() async {
@@ -198,7 +252,7 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
       _error = null;
     });
     try {
-      await ApiClient().postSalesDeductionStrict(
+      final result = await ApiClient().postSalesDeductionStrict(
         storeId: 'main_store',
         idempotencyKey: _idempotencyKey,
         payload: {
@@ -219,6 +273,44 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
         quantitiesByProductId: {for (final medicine in _selected) medicine.productId: _quantities[medicine.productId] ?? 0},
         sourceReference: _idempotencyKey,
       );
+
+      // Register the counter sale in the Sales Hub so it appears in reports
+      final txId = result['transaction_id']?.toString() ?? result['id']?.toString() ?? _idempotencyKey;
+      final saleId = txId.startsWith('SR-') ? txId : 'SR-$txId';
+      final saleReport = SalesReport(
+        id: saleId,
+        reportReference: _idempotencyKey,
+        reportDate: DateTime.now(),
+        status: SalesReportStatus.posted,
+        selectedFileName: 'Counter Sale',
+        selectedFileSize: '—',
+        authorizer: 'pharmacist_operator',
+        transactionReference: txId,
+        isSimulated: false,
+        isCounterSale: true,
+        lines: _selected.map((m) {
+          final qty = _quantities[m.productId] ?? 0;
+          return SalesLineItem(
+            id: '$saleId-${m.productId}',
+            originalOcrText: '${m.name} $qty ${m.saleUnit}',
+            matchedProductId: m.productId,
+            matchedProductName: m.name,
+            genericName: m.genericName,
+            confidenceScore: 1.0,
+            quantity: qty,
+            unit: m.saleUnit,
+            unitsPerPack: m.unitsPerPack,
+            packUnit: m.packUnit,
+            reviewStatus: SalesLineReviewStatus.accepted,
+          );
+        }).toList(),
+      );
+      MockSalesOcrAdapter().addCounterSaleReport(saleReport);
+      try {
+        await MockSalesOcrAdapter().syncReportsFromBackend();
+        await MockDataService().syncFromBackend();
+      } catch (_) {}
+
       setState(() => _step = 3);
     } on ApiException catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -361,67 +453,497 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
   }
 
   Widget _quantityStep() {
+    final grandTotalUnits = _selected.fold<int>(
+      0,
+      (sum, m) => sum + (_quantities[m.productId] ?? 0),
+    );
+
     return Column(
       children: [
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: _selected
-                .map(
-                  (m) => Card(
-                    color: AppColors.surface,
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(m.name, style: AppTypography.bodyStrong),
-                                Text(
-                                  '${m.strength} • ${m.form} • Stock ${m.currentStock} ${m.saleUnit}s',
-                                  style: AppTypography.caption,
-                                ),
-                                Text(
-                                  'Unit: ${m.saleUnit}',
-                                  style: AppTypography.caption,
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () => _changeQuantity(m, -1),
-                            icon: const Icon(Icons.remove_circle_outline),
-                          ),
-                          Text(
-                            '${_quantities[m.productId]}',
-                            style: AppTypography.bodyStrong,
-                          ),
-                          IconButton(
-                            onPressed: () => _changeQuantity(m, 1),
-                            icon: const Icon(Icons.add_circle_outline),
-                          ),
-                          IconButton(
-                            tooltip: 'Remove',
-                            onPressed: () =>
-                                setState(() => _quantities.remove(m.productId)),
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: AppColors.dangerFg,
-                            ),
-                          ),
-                        ],
+        // Refined summary header card
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.outline),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: AppColors.matchaDeep.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.receipt_long_rounded,
+                  size: 18,
+                  color: AppColors.matchaDeep,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${_selected.length} ${_selected.length == 1 ? 'Medicine' : 'Medicines'} Selected',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.ink,
                       ),
                     ),
+                    Text(
+                      'Adjust strips and tablets to deduct from inventory',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.inkSoft.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.matchaDeep,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  '$grandTotalUnits units',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
                   ),
-                )
-                .toList(),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            children: _selected.map(_medicineQuantityCard).toList(),
           ),
         ),
         if (_error != null) _errorBanner(),
         _bottomButton('Review Transaction', _selected.isEmpty ? null : _next),
       ],
+    );
+  }
+
+  void _adjustQuantity(Medicine medicine, {required bool isPack, required int delta}) {
+    final sCtrl = _stripControllers[medicine.productId];
+    final tCtrl = _tabletControllers[medicine.productId];
+    int strips = int.tryParse(sCtrl?.text.trim() ?? '0') ?? 0;
+    int tablets = int.tryParse(tCtrl?.text.trim() ?? '0') ?? 0;
+
+    if (isPack) {
+      strips = (strips + delta).clamp(0, 9999);
+      sCtrl?.text = '$strips';
+    } else {
+      tablets = (tablets + delta).clamp(0, 9999);
+      tCtrl?.text = '$tablets';
+    }
+    _onQuantityFieldChanged(medicine);
+  }
+
+  Widget _buildUnitStepperBox({
+    required String label,
+    required String unitLabel,
+    required IconData icon,
+    required TextEditingController controller,
+    required bool canDecrement,
+    required VoidCallback onMinus,
+    required VoidCallback onPlus,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.canvas,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 12, color: AppColors.inkSoft),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.inkSoft,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              // Minus button
+              Material(
+                color: canDecrement
+                    ? AppColors.surface
+                    : AppColors.surface.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: canDecrement ? onMinus : null,
+                  child: Container(
+                    width: 30,
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: canDecrement
+                            ? AppColors.outline
+                            : AppColors.outline.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.remove_rounded,
+                      size: 16,
+                      color: canDecrement
+                          ? AppColors.ink
+                          : AppColors.inkSoft.withValues(alpha: 0.3),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              // Center TextField
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  textAlign: TextAlign.center,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.ink,
+                  ),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                    border: InputBorder.none,
+                    hintText: '0',
+                    hintStyle: TextStyle(
+                      color: AppColors.inkSoft.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  onChanged: onChanged,
+                ),
+              ),
+              const SizedBox(width: 4),
+              // Plus button
+              Material(
+                color: AppColors.matchaDeep.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: onPlus,
+                  child: Container(
+                    width: 30,
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppColors.matchaDeep.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.add_rounded,
+                      size: 16,
+                      color: AppColors.matchaDeep,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Center(
+            child: Text(
+              unitLabel,
+              style: const TextStyle(
+                fontSize: 10,
+                color: AppColors.inkSoft,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _medicineQuantityCard(Medicine m) {
+    final factor = m.unitsPerPack > 0 ? m.unitsPerPack : 1;
+    final currentTotal = _quantities[m.productId] ?? 1;
+
+    final stripController = _stripControllers.putIfAbsent(
+      m.productId,
+      () => TextEditingController(text: '${currentTotal ~/ factor}'),
+    );
+    final tabletController = _tabletControllers.putIfAbsent(
+      m.productId,
+      () => TextEditingController(text: '${currentTotal % factor}'),
+    );
+
+    final total = _quantities[m.productId] ?? 0;
+    final isExceeded = total > m.currentStock;
+    final isZero = total <= 0;
+    final packLabel = m.packUnit.isNotEmpty ? m.packUnit : 'strip';
+    final saleLabel = m.saleUnit.isNotEmpty ? m.saleUnit : 'tablet';
+
+    final stripsVal = int.tryParse(stripController.text.trim()) ?? 0;
+    final tabletsVal = int.tryParse(tabletController.text.trim()) ?? 0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isExceeded ? AppColors.dangerFg : AppColors.outline,
+          width: isExceeded ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.ink.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: isExceeded
+                      ? AppColors.dangerBg
+                      : AppColors.vanilla.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.medication_rounded,
+                  size: 20,
+                  color: isExceeded ? AppColors.dangerFg : AppColors.carob,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      m.name,
+                      style: AppTypography.bodyStrong.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: [
+                        _pill(m.strength, AppColors.chai.withValues(alpha: 0.35)),
+                        _pill(m.form, AppColors.pistache.withValues(alpha: 0.45)),
+                        _pill(
+                          'Stock: ${m.currentStock} ${m.saleUnit}s',
+                          isExceeded
+                              ? AppColors.dangerBg
+                              : AppColors.almond.withValues(alpha: 0.8),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.sync_alt_rounded,
+                          size: 11,
+                          color: AppColors.inkSoft,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '1 $packLabel = $factor $saleLabel${factor > 1 ? 's' : ''}',
+                          style: AppTypography.caption.copyWith(
+                            color: AppColors.inkSoft,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Material(
+                color: AppColors.dangerFg.withValues(alpha: 0.08),
+                shape: const CircleBorder(),
+                child: Tooltip(
+                  message: 'Remove',
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () {
+                      setState(() {
+                        _quantities.remove(m.productId);
+                        _stripControllers.remove(m.productId)?.dispose();
+                        _tabletControllers.remove(m.productId)?.dispose();
+                      });
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.all(7),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        color: AppColors.dangerFg,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Two separate editable stepper boxes: Strips & Tablets
+          Row(
+            children: [
+              // 1. Strips / Packs Field
+              Expanded(
+                child: _buildUnitStepperBox(
+                  label: '${packLabel[0].toUpperCase()}${packLabel.substring(1)}s',
+                  unitLabel: packLabel,
+                  icon: Icons.inventory_2_outlined,
+                  controller: stripController,
+                  canDecrement: stripsVal > 0,
+                  onMinus: () => _adjustQuantity(m, isPack: true, delta: -1),
+                  onPlus: () => _adjustQuantity(m, isPack: true, delta: 1),
+                  onChanged: (_) => _onQuantityFieldChanged(m),
+                ),
+              ),
+              const SizedBox(width: 10),
+
+              // 2. Tablets / Loose Field
+              Expanded(
+                child: _buildUnitStepperBox(
+                  label: '${saleLabel[0].toUpperCase()}${saleLabel.substring(1)}s',
+                  unitLabel: saleLabel,
+                  icon: Icons.circle_outlined,
+                  controller: tabletController,
+                  canDecrement: tabletsVal > 0,
+                  onMinus: () => _adjustQuantity(m, isPack: false, delta: -1),
+                  onPlus: () => _adjustQuantity(m, isPack: false, delta: 1),
+                  onChanged: (_) => _onQuantityFieldChanged(m),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Total display row
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: isExceeded
+                  ? AppColors.dangerBg.withValues(alpha: 0.5)
+                  : isZero
+                      ? AppColors.chai.withValues(alpha: 0.15)
+                      : AppColors.successBg.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isExceeded
+                    ? AppColors.dangerFg.withValues(alpha: 0.4)
+                    : isZero
+                        ? AppColors.chai.withValues(alpha: 0.4)
+                        : AppColors.matchaDeep.withValues(alpha: 0.25),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isExceeded
+                      ? Icons.error_outline_rounded
+                      : isZero
+                          ? Icons.info_outline_rounded
+                          : Icons.check_circle_rounded,
+                  size: 16,
+                  color: isExceeded
+                      ? AppColors.dangerFg
+                      : isZero
+                          ? AppColors.carob
+                          : AppColors.successFg,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    isExceeded
+                        ? 'Total: $total $saleLabel${total == 1 ? '' : 's'} (Exceeds stock of ${m.currentStock})'
+                        : isZero
+                            ? 'Enter strips or tablets (Current total: 0)'
+                            : stripsVal > 0 && tabletsVal > 0
+                                ? 'Total: ($stripsVal × $factor) + $tabletsVal = $total $saleLabel${total == 1 ? '' : 's'}'
+                                : 'Total: $total $saleLabel${total == 1 ? '' : 's'}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: isExceeded
+                          ? AppColors.dangerFg
+                          : isZero
+                              ? AppColors.carob
+                              : AppColors.successFg,
+                    ),
+                  ),
+                ),
+                if (!isExceeded && !isZero)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${m.currentStock - total} left',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.inkSoft,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -510,39 +1032,89 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
           (totals[medicine.saleUnit] ?? 0) +
           (_quantities[medicine.productId] ?? 0);
     }
+    final now = DateTime.now();
+    final dateStr = '${now.day}/${now.month}/${now.year}';
+
     return Column(
       children: [
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
             children: [
-              Text('Review Transaction', style: AppTypography.screenTitle),
+              // Compact summary card
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.successBg.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.outline),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.matchaDeep,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.point_of_sale_rounded,
+                          color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Manual Counter Sale',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: AppColors.matchaDeep)),
+                          Text('$dateStr • ${_selected.length} medicine${_selected.length == 1 ? '' : 's'} • ${totals.entries.map((e) => '${e.value} ${e.key}').join(', ')}',
+                              style: AppTypography.caption),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Text('Medicines', style: AppTypography.section.copyWith(fontSize: 15)),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _step = 1),
+                    icon: const Icon(Icons.edit_outlined, size: 14),
+                    label: const Text('Edit', style: TextStyle(fontSize: 12)),
+                    style: TextButton.styleFrom(minimumSize: const Size(0, 32), padding: EdgeInsets.zero),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              ..._selected.map(_compactMedicineRow),
               const SizedBox(height: 4),
-              Text('Please verify the details before confirming', style: AppTypography.body.copyWith(color: AppColors.inkSoft)),
-              const SizedBox(height: 18),
-              _modernTransactionBanner(),
-              const SizedBox(height: 22),
-              Row(children: [
-                Container(
-                  width: 46,
-                  height: 46,
-                  decoration: BoxDecoration(color: AppColors.chai.withOpacity(0.2), borderRadius: BorderRadius.circular(15)),
-                  child: const Icon(Icons.medication_outlined, color: AppColors.carob),
+              // Info notice
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.chai.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.chai.withOpacity(0.3)),
                 ),
-                const SizedBox(width: 12),
-                Expanded(child: Text('Medicines (${_selected.length})', style: AppTypography.section.copyWith(fontSize: 24))),
-                OutlinedButton.icon(
-                  onPressed: () => setState(() => _step = 1),
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text('Edit'),
-                ),
-              ]),
-              const SizedBox(height: 12),
-              ..._selected.map(_modernMedicineCard),
-              const SizedBox(height: 8),
-              _modernSummary(totals),
-              const SizedBox(height: 16),
-              _modernNotice(),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Icon(Icons.info_outline_rounded,
+                      color: AppColors.carob, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Stock will be reduced on confirmation. Please verify quantities.',
+                      style: AppTypography.caption.copyWith(color: AppColors.carob),
+                    ),
+                  ),
+                ]),
+              ),
             ],
           ),
         ),
@@ -550,25 +1122,29 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
         SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
             child: Row(children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => setState(() => _step = 1),
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Edit Quantities'),
-                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+                  onPressed: _submitting ? null : () => setState(() => _step = 1),
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Edit'),
+                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
+                flex: 2,
                 child: FilledButton.icon(
                   onPressed: _submitting ? null : _confirm,
                   icon: _submitting
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.check_rounded),
-                  label: const Text('Confirm Transaction'),
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+                      ? const SizedBox(
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.check_rounded, size: 18),
+                  label: Text(_submitting ? 'Posting…' : 'Confirm Stock Out'),
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
                 ),
               ),
             ]),
@@ -578,114 +1154,73 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
     );
   }
 
-  Widget _modernTransactionBanner() => Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: AppColors.successBg.withOpacity(0.32),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: AppColors.outline),
-        ),
-        child: Row(children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(color: AppColors.successBg, borderRadius: BorderRadius.circular(18)),
-            child: const Icon(Icons.inventory_2_outlined, size: 34, color: AppColors.matchaDeep),
-          ),
-          const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Stock Out', style: AppTypography.section.copyWith(color: AppColors.matchaDeep)),
-            const SizedBox(height: 4),
-            Text('Date: ${MaterialLocalizations.of(context).formatMediumDate(DateTime.now())}', style: AppTypography.body.copyWith(color: AppColors.inkSoft)),
-          ])),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(color: AppColors.vanilla, borderRadius: BorderRadius.circular(18)),
-            child: const Text('Manual Transaction', style: TextStyle(color: AppColors.carob, fontWeight: FontWeight.w700, fontSize: 12)),
-          ),
-        ]),
-      );
-
-  Widget _modernMedicineCard(Medicine medicine) {
+  Widget _compactMedicineRow(Medicine medicine) {
     final quantity = _quantities[medicine.productId] ?? 0;
+    final remaining = medicine.currentStock - quantity;
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: AppColors.outline)),
-      child: Column(children: [
-        Row(children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(color: AppColors.successBg, borderRadius: BorderRadius.circular(18)),
-            child: const Icon(Icons.medication_outlined, size: 34, color: AppColors.matchaDeep),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.outline),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(medicine.name,
+                    style: AppTypography.bodyStrong.copyWith(fontSize: 14),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Wrap(
+                  spacing: 4,
+                  children: [
+                    _pill('${medicine.strength}', AppColors.chai),
+                    _pill(medicine.form, AppColors.matcha.withOpacity(0.5)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text('Remaining after: $remaining ${medicine.saleUnit}',
+                    style: AppTypography.caption.copyWith(
+                        color: remaining < 5
+                            ? AppColors.dangerFg
+                            : AppColors.inkSoft)),
+              ],
+            ),
           ),
-          const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(medicine.name, style: AppTypography.title.copyWith(fontSize: 21)),
-            const SizedBox(height: 4),
-            Text('${medicine.strength} • ${medicine.form}', style: AppTypography.body.copyWith(color: AppColors.inkSoft)),
-          ])),
+          const SizedBox(width: 8),
           Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: AppColors.vanilla.withOpacity(0.65), borderRadius: BorderRadius.circular(16)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('Current Stock', style: AppTypography.caption.copyWith(color: AppColors.inkSoft)),
-              const SizedBox(height: 3),
-              Text('${medicine.currentStock}', style: AppTypography.title.copyWith(color: AppColors.matchaDeep, fontSize: 22)),
-            ]),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.matchaDeep,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '$quantity ${medicine.saleUnit}',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13),
+            ),
           ),
-        ]),
-        const SizedBox(height: 14),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(color: AppColors.chai.withOpacity(0.12), borderRadius: BorderRadius.circular(16)),
-          child: Row(children: [
-            const Icon(Icons.grid_view_rounded, color: AppColors.carob),
-            const SizedBox(width: 12),
-            Text('Quantity', style: AppTypography.bodyStrong),
-            const Spacer(),
-            Text('$quantity ${medicine.saleUnit}${quantity == 1 ? '' : 's'}', style: AppTypography.bodyStrong.copyWith(color: AppColors.carob)),
-          ]),
-        ),
-      ]),
+        ],
+      ),
     );
   }
 
-  Widget _modernSummary(Map<String, int> totals) => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(20), border: Border.all(color: AppColors.outline)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Icon(Icons.bar_chart_rounded, color: AppColors.carob, size: 30),
-            const SizedBox(width: 10),
-            Text('Transaction Summary', style: AppTypography.section.copyWith(fontSize: 22)),
-          ]),
-          const SizedBox(height: 14),
-          _modernSummaryRow('Distinct medicines', '${_selected.length}', Icons.medication_outlined),
-          ...totals.entries.map((entry) => _modernSummaryRow('Total ${entry.key}${entry.value == 1 ? '' : 's'}', '${entry.value}', Icons.inventory_2_outlined)),
-        ]),
-      );
-
-  Widget _modernSummaryRow(String label, String value, IconData icon) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 7),
-        child: Row(children: [
-          Icon(icon, color: AppColors.matchaDeep, size: 24),
-          const SizedBox(width: 12),
-          Expanded(child: Text(label, style: AppTypography.body)),
-          Text(value, style: AppTypography.title.copyWith(color: AppColors.matchaDeep, fontSize: 22)),
-        ]),
-      );
-
-  Widget _modernNotice() => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: AppColors.chai.withOpacity(0.12), borderRadius: BorderRadius.circular(18), border: Border.all(color: AppColors.chai.withOpacity(0.35))),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Icon(Icons.info_outline_rounded, color: AppColors.carob, size: 28),
-          const SizedBox(width: 12),
-          Expanded(child: Text('This will reduce stock for the selected medicines. Please confirm the quantities are correct before proceeding.', style: AppTypography.body.copyWith(color: AppColors.carob))),
-        ]),
+  Widget _pill(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(label,
+            style: const TextStyle(
+                fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.carob)),
       );
 
   Widget _success() => Center(
@@ -717,12 +1252,52 @@ class _ManualTransactionScreenState extends State<ManualTransactionScreen> {
     padding: const EdgeInsets.all(16),
     child: Text(_error!, style: const TextStyle(color: AppColors.dangerFg)),
   );
-  Widget _bottomButton(String label, VoidCallback? onPressed) => SafeArea(
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+  Widget _bottomButton(String label, VoidCallback? onPressed) => Container(
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      border: const Border(
+        top: BorderSide(color: AppColors.outline, width: 1.0),
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: AppColors.ink.withValues(alpha: 0.04),
+          blurRadius: 8,
+          offset: const Offset(0, -2),
+        ),
+      ],
+    ),
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+    child: SafeArea(
+      top: false,
       child: SizedBox(
         width: double.infinity,
-        child: FilledButton(onPressed: onPressed, child: Text(label)),
+        height: 48,
+        child: FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.matchaDeep,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            elevation: 0,
+          ),
+          onPressed: onPressed,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.arrow_forward_rounded, size: 18),
+            ],
+          ),
+        ),
       ),
     ),
   );

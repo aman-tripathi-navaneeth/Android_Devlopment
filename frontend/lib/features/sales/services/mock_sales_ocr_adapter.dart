@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../../core/api/api_client.dart';
 import '../models/sales_report.dart';
 
 /// Pre-configured mock OCR scenarios per Section 12.
@@ -47,121 +48,50 @@ abstract class SalesOcrAdapter {
 class MockSalesOcrAdapter extends ChangeNotifier implements SalesOcrAdapter {
   static final MockSalesOcrAdapter _instance = MockSalesOcrAdapter._internal();
   factory MockSalesOcrAdapter() => _instance;
-  MockSalesOcrAdapter._internal();
+  MockSalesOcrAdapter._internal() {
+    // Only load authentic sales reports from the backend
+    syncReportsFromBackend();
+  }
 
   final List<SalesReport> _history = [];
   List<SalesReport> get history => List.unmodifiable(_history);
+  bool _isSyncing = false;
 
-  void _initHistory() {
-    final now = DateTime.now();
+  /// Sync salesReports from the backend PostgreSQL into local history.
+  Future<void> syncReportsFromBackend() async {
+    if (_isSyncing) return;
+    _isSyncing = true;
+    try {
+      final api = ApiClient();
+      final list = await api.getSalesReports();
+      final loaded = <SalesReport>[];
+      for (final raw in list) {
+        try {
+          final report = SalesReport.fromBackendJson(raw);
+          loaded.add(report);
+        } catch (_) {}
+      }
+      // Preserve any locally recorded reports so newly posted sales don't vanish
+      for (final existing in _history) {
+        if (!loaded.any((r) => r.id == existing.id || (existing.reportReference.isNotEmpty && r.reportReference == existing.reportReference))) {
+          loaded.add(existing);
+        }
+      }
+      _history.clear();
+      _history.addAll(loaded);
+      notifyListeners();
+    } catch (_) {}
+    _isSyncing = false;
+  }
 
-    // 1. Seeded Posted Report 1 (Yesterday)
-    _history.add(
-      SalesReport(
-        id: 'rep-hist-1',
-        reportReference: 'REPORT-2026-10-12',
-        reportDate: now.subtract(const Duration(days: 1)),
-        importTimestamp: now.subtract(const Duration(days: 1, hours: 2)),
-        status: SalesReportStatus.posted,
-        selectedFileName: 'EOD_Sales_12Oct2026.pdf',
-        selectedFileSize: '1.8 MB',
-        authorizer: 'Aditya (Pharmacist)',
-        transactionReference: 'TXN-OUT-2026-1012-01',
-        isSimulated: true,
-        notes: 'End-of-day register printout from counter billing terminal.',
-        lines: [
-          SalesLineItem(
-            id: 'H1-L1',
-            originalOcrText: 'DOLO 650MG STRIP 10 (REGULAR COUNTER)',
-            matchedProductId: 'MED-000101',
-            matchedProductName: 'Dolo 650mg',
-            genericName: 'Paracetamol',
-            confidenceScore: 0.96,
-            quantity: 10,
-            unit: 'strips',
-            unitsPerPack: 15,
-            packUnit: 'strip',
-            batchAllocationRule: 'FEFO (Batch DL-91)',
-            reviewStatus: SalesLineReviewStatus.accepted,
-          ),
-          SalesLineItem(
-            id: 'H1-L2',
-            originalOcrText: 'PAN 40MG STRIP 5 (PRESCRIBED)',
-            matchedProductId: 'MED-000103',
-            matchedProductName: 'Pan 40',
-            genericName: 'Pantoprazole',
-            confidenceScore: 0.92,
-            quantity: 5,
-            unit: 'strips',
-            unitsPerPack: 15,
-            packUnit: 'strip',
-            batchAllocationRule: 'FEFO (Batch PN-2024-8)',
-            reviewStatus: SalesLineReviewStatus.accepted,
-          ),
-          SalesLineItem(
-            id: 'H1-L3',
-            originalOcrText: 'GLYCOMET 500 LOOSE 20T',
-            matchedProductId: 'MED-000105',
-            matchedProductName: 'Glycomet 500',
-            genericName: 'Metformin HCl',
-            confidenceScore: 0.95,
-            quantity: 20,
-            unit: 'tablets',
-            unitsPerPack: 20,
-            packUnit: 'strip',
-            batchAllocationRule: 'FEFO (Batch GL-2025)',
-            reviewStatus: SalesLineReviewStatus.accepted,
-          ),
-        ],
-      ),
-    );
-
-    // 2. Seeded Posted Report 2 (2 Days Ago)
-    _history.add(
-      SalesReport(
-        id: 'rep-hist-2',
-        reportReference: 'REPORT-2026-10-11',
-        reportDate: now.subtract(const Duration(days: 2)),
-        importTimestamp: now.subtract(const Duration(days: 2, hours: 1)),
-        status: SalesReportStatus.posted,
-        selectedFileName: 'Manual_Daybook_11Oct.jpg',
-        selectedFileSize: '3.1 MB',
-        authorizer: 'Aditya (Pharmacist)',
-        transactionReference: 'TXN-OUT-2026-1011-01',
-        isSimulated: true,
-        notes: 'Manual register photo imported at close of shift.',
-        lines: [
-          SalesLineItem(
-            id: 'H2-L1',
-            originalOcrText: 'AUGMENTIN 625 DUO STRIP 2',
-            matchedProductId: 'MED-000102',
-            matchedProductName: 'Augmentin 625 Duo',
-            genericName: 'Amoxicillin & Clavulanate',
-            confidenceScore: 0.94,
-            quantity: 2,
-            unit: 'strips',
-            unitsPerPack: 10,
-            packUnit: 'strip',
-            batchAllocationRule: 'FEFO (Batch AG-84)',
-            reviewStatus: SalesLineReviewStatus.accepted,
-          ),
-          SalesLineItem(
-            id: 'H2-L2',
-            originalOcrText: 'TELMA 40MG 1 STRIP (REGULAR)',
-            matchedProductId: 'MED-000106',
-            matchedProductName: 'Telma 40',
-            genericName: 'Telmisartan',
-            confidenceScore: 0.91,
-            quantity: 1,
-            unit: 'strips',
-            unitsPerPack: 15,
-            packUnit: 'strip',
-            batchAllocationRule: 'FEFO (Batch TL-401)',
-            reviewStatus: SalesLineReviewStatus.accepted,
-          ),
-        ],
-      ),
-    );
+  /// Called immediately after a counter sale is confirmed so the report
+  /// appears in the Sales Hub without waiting for the next sync.
+  void addCounterSaleReport(SalesReport report) {
+    final existing = _history.indexWhere((r) => r.id == report.id);
+    if (existing == -1) {
+      _history.insert(0, report);
+      notifyListeners();
+    }
   }
 
   /// Checks if a report reference already exists in history.
@@ -271,7 +201,6 @@ class MockSalesOcrAdapter extends ChangeNotifier implements SalesOcrAdapter {
       case MockOcrScenario.duplicateWarning:
       case MockOcrScenario.simulatedFailure:
       case MockOcrScenario.standardMixed:
-      default:
         lines.addAll([
           SalesLineItem(
             id: '$reportId-L1',

@@ -2,12 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/mock_data_service.dart';
 import '../../../core/theme/colors.dart';
-import '../../../core/theme/text_styles.dart';
-import '../../../core/ui/confidence_chip.dart';
 import '../models/sales_report.dart';
 
-/// Reusable card for reviewing and editing extracted sales lines.
-/// Implements Generic Grouping, Unit Auto-Identification, and Pack-Size Conversion.
+/// Minimalistic, aesthetic card for reviewing and editing extracted sales lines.
 class SalesLineCard extends StatefulWidget {
   final SalesLineItem line;
   final VoidCallback onSelectCatalogue;
@@ -78,8 +75,8 @@ class _SalesLineCardState extends State<SalesLineCard> {
     final brandNames = matchedMeds.map((m) => m.name).toSet().toList();
 
     final Color borderColor = needsAttention
-        ? (isUnmatched ? AppColors.dangerFg : (isUnitUnclear ? const Color(0xFFD97706) : AppColors.chai))
-        : AppColors.outline;
+        ? (isUnmatched ? const Color(0xFFFECACA) : (isUnitUnclear ? const Color(0xFFFDE68A) : const Color(0xFFFDE68A)))
+        : const Color(0xFFE2E8F0);
 
     final String genericTitle = line.genericName.isNotEmpty
         ? line.genericName
@@ -91,434 +88,458 @@ class _SalesLineCardState extends State<SalesLineCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: borderColor,
-          width: needsAttention ? 1.6 : 1.0,
+          width: needsAttention ? 1.5 : 1.0,
         ),
-        boxShadow: [
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: Color(0x07000000),
+            blurRadius: 10,
+            offset: Offset(0, 3),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header Bar: Raw OCR Snippet + Confidence Chip + Delete
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: needsAttention
-                  ? AppColors.vanilla.withOpacity(0.4)
-                  : AppColors.canvas,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(11),
-              ),
-              border: Border(
-                bottom: BorderSide(color: AppColors.outline.withOpacity(0.6)),
-              ),
-            ),
-            child: Row(
+      child: Padding(
+        padding: const EdgeInsets.all(14.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Minimal Bar: Scanned Quote + Match Indicator + Delete
+            Row(
               children: [
+                const Icon(
+                  Icons.auto_awesome_outlined,
+                  size: 13,
+                  color: Color(0xFF94A3B8),
+                ),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    '"${line.originalOcrText}"',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF64748B),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _buildConfidenceBadge(line.confidenceScore),
+                const SizedBox(width: 4),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: widget.onDelete,
+                    child: const Padding(
+                      padding: EdgeInsets.all(4.0),
+                      child: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: Color(0xFF94A3B8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            // Medicine Header: Icon + Title/Tags + Action Buttons
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Minimal icon container
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: isUnmatched
+                        ? const Color(0xFFFEF2F2)
+                        : const Color(0xFFF0FDF4),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    isUnmatched
+                        ? Icons.warning_amber_rounded
+                        : Icons.medication_outlined,
+                    color: isUnmatched
+                        ? AppColors.dangerFg
+                        : AppColors.matchaDeep,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'RAW SCANNED TEXT:',
-                        style: AppTypography.caption.copyWith(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.inkSoft,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 1),
-                      Text(
-                        '"${line.originalOcrText}"',
+                        genericTitle,
                         style: const TextStyle(
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ConfidenceChip(confidence: line.confidenceScore),
-                const SizedBox(width: 6),
-                IconButton(
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: AppColors.dangerFg,
-                    size: 18,
-                  ),
-                  tooltip: 'Delete row',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 28,
-                    minHeight: 28,
-                  ),
-                  onPressed: widget.onDelete,
-                ),
-              ],
-            ),
-          ),
-
-          // Main Content
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Generic Medicine Identification & Brand Grouping
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: isUnmatched
-                            ? AppColors.dangerBg
-                            : const Color(0xFFE8F5E9),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: isUnmatched ? AppColors.dangerFg : const Color(0xFF81C784),
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                          letterSpacing: -0.2,
                         ),
                       ),
-                      child: Icon(
-                        isUnmatched
-                            ? Icons.warning_amber_rounded
-                            : Icons.science_outlined,
-                        color: isUnmatched
-                            ? AppColors.dangerFg
-                            : const Color(0xFF2E7D32),
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (line.isMatched) ...[
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFE0F2FE),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: const Color(0xFFBAE6FD)),
-                                  ),
-                                  child: const Text(
-                                    'GENERIC GROUP',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 9.5,
-                                      color: Color(0xFF0369A1),
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: combinedStock >= line.calculatedLooseUnits
-                                        ? const Color(0xFFECFDF5)
-                                        : const Color(0xFFFEF2F2),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    'Available: $combinedStock tabs',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 10,
-                                      color: combinedStock >= line.calculatedLooseUnits
-                                          ? const Color(0xFF047857)
-                                          : AppColors.dangerFg,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              genericTitle,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.ink,
+                      const SizedBox(height: 3),
+                      if (line.isMatched) ...[
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(4),
                               ),
-                            ),
-                            const SizedBox(height: 2),
-                            if (brandNames.isNotEmpty)
-                              Text(
-                                'Brands: ${brandNames.join(', ')} • Pack: ${line.unitsPerPack} tabs/strip',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.inkSoft,
+                              child: const Text(
+                                'GENERIC',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 9,
+                                  color: Color(0xFF475569),
+                                  letterSpacing: 0.4,
                                 ),
                               ),
-                          ] else ...[
-                            const Text(
-                              'UNMATCHED MEDICINE',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.dangerFg,
-                                fontSize: 14,
-                              ),
                             ),
-                            const SizedBox(height: 2),
-                            const Text(
-                              'Please match with catalogue generic medicine',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: AppColors.dangerFg,
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: combinedStock >= line.calculatedLooseUnits
+                                    ? const Color(0xFFECFDF5)
+                                    : const Color(0xFFFEF2F2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'Available: $combinedStock tabs',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 10,
+                                  color: combinedStock >= line.calculatedLooseUnits
+                                      ? const Color(0xFF059669)
+                                      : AppColors.dangerFg,
+                                ),
                               ),
                             ),
                           ],
-                        ],
-                      ),
-                    ),
-                    // Action Buttons for Matching & Editing
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          icon: const Icon(Icons.search_rounded, size: 14),
-                          label: Text(
-                            isUnmatched ? 'Match' : 'Change',
+                        ),
+                        if (brandNames.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            'Brands: ${brandNames.take(2).join(', ')}${brandNames.length > 2 ? '...' : ''} • ${line.unitsPerPack} tabs/strip',
                             style: const TextStyle(
                               fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF64748B),
                             ),
                           ),
-                          onPressed: widget.onSelectCatalogue,
-                        ),
-                        const SizedBox(height: 4),
-                        InkWell(
-                          onTap: widget.onEditNameManually,
-                          child: const Text(
-                            'Edit name',
-                            style: TextStyle(
-                              color: AppColors.matchaDeep,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              decoration: TextDecoration.underline,
-                            ),
+                        ],
+                      ] else ...[
+                        const Text(
+                          'Unmatched medicine • Please map with catalogue',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.dangerFg,
                           ),
                         ),
                       ],
+                    ],
+                  ),
+                ),
+                // Action Buttons (Change & Edit)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    InkWell(
+                      onTap: widget.onSelectCatalogue,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isUnmatched ? Icons.search_rounded : Icons.swap_horiz_rounded,
+                              size: 13,
+                              color: const Color(0xFF334155),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              isUnmatched ? 'Match' : 'Change',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    InkWell(
+                      onTap: widget.onEditNameManually,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 2.0, horizontal: 2.0),
+                        child: Text(
+                          'Edit name',
+                          style: TextStyle(
+                            color: AppColors.matchaDeep,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
-
-                const SizedBox(height: 12),
-
-                // Unit Confirmation Prompt (If unclear from scan)
-                if (isUnitUnclear) ...[
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFFBEB),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFFDE68A)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.help_outline_rounded,
-                          color: Color(0xFFD97706),
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'Unit unclear! Confirm unit:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                              color: Color(0xFF92400E),
-                            ),
-                          ),
-                        ),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD97706),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          onPressed: () => widget.onUnitChanged('strip'),
-                          child: const Text(
-                            'Strip',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD97706),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          onPressed: () => widget.onUnitChanged('tablet'),
-                          child: const Text(
-                            'Tablet',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-
-                const Divider(height: 16),
-
-                // Quantity & Unit Controls + Deduction Calculation
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final isNarrowCard = constraints.maxWidth < 360;
-
-                    final qtyAndUnitRow = Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 80,
-                          child: TextFormField(
-                            controller: _qtyController,
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14,
-                            ),
-                            decoration: InputDecoration(
-                              labelText: 'Qty',
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 6,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                            ),
-                            onChanged: (val) {
-                              final parsed = int.tryParse(val);
-                              if (parsed != null && parsed >= 0) {
-                                widget.onQuantityChanged(parsed);
-                              }
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.canvas,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppColors.outline),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _buildUnitOption(
-                                label: 'Strip',
-                                isSelected: isStrip,
-                                onTap: () => widget.onUnitChanged('strip'),
-                              ),
-                              _buildUnitOption(
-                                label: 'Tablet',
-                                isSelected: isTablet,
-                                onTap: () => widget.onUnitChanged('tablet'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    );
-
-                    final deductionInfo = Column(
-                      crossAxisAlignment: isNarrowCard
-                          ? CrossAxisAlignment.start
-                          : CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '-${line.calculatedLooseUnits} tabs to deduct',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12.5,
-                            color: isUnitUnclear
-                                ? const Color(0xFFD97706)
-                                : AppColors.dangerFg,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        Text(
-                          isStrip
-                              ? '(${line.quantity} strips × ${line.unitsPerPack} tabs)'
-                              : (isTablet ? '(${line.quantity} loose tablets)' : 'Unit unconfirmed'),
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: isUnitUnclear ? const Color(0xFFD97706) : AppColors.inkSoft,
-                          ),
-                        ),
-                      ],
-                    );
-
-                    if (isNarrowCard) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          qtyAndUnitRow,
-                          const SizedBox(height: 8),
-                          deductionInfo,
-                        ],
-                      );
-                    }
-
-                    return Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        qtyAndUnitRow,
-                        const SizedBox(width: 8),
-                        Flexible(child: deductionInfo),
-                      ],
-                    );
-                  },
-                ),
               ],
+            ),
+
+            // Unit Unclear Alert Prompt (If needed)
+            if (isUnitUnclear) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFDE68A)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.help_outline_rounded,
+                      color: Color(0xFFD97706),
+                      size: 15,
+                    ),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Confirm unit:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11.5,
+                          color: Color(0xFF92400E),
+                        ),
+                      ),
+                    ),
+                    _buildQuickUnitButton('Strip', () => widget.onUnitChanged('strip')),
+                    const SizedBox(width: 6),
+                    _buildQuickUnitButton('Tablet', () => widget.onUnitChanged('tablet')),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 12),
+
+            // Bottom Minimal Tray: Qty Input + Unit Toggle + Deduction Readout
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 370;
+
+                final qtyAndUnitRow = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Qty',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 48,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                      ),
+                      child: TextField(
+                        controller: _qtyController,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: Color(0xFF0F172A),
+                        ),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 7),
+                          border: InputBorder.none,
+                        ),
+                        onChanged: (val) {
+                          final parsed = int.tryParse(val);
+                          if (parsed != null && parsed >= 0) {
+                            widget.onQuantityChanged(parsed);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+
+                    // Unit Toggle (Strip | Tablet)
+                    Container(
+                      height: 32,
+                      padding: const EdgeInsets.all(2.5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE2E8F0),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildUnitOption(
+                            label: 'Strip',
+                            isSelected: isStrip,
+                            onTap: () => widget.onUnitChanged('strip'),
+                          ),
+                          _buildUnitOption(
+                            label: 'Tablet',
+                            isSelected: isTablet,
+                            onTap: () => widget.onUnitChanged('tablet'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+
+                final deductionInfo = Column(
+                  crossAxisAlignment: isNarrow ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '-${line.calculatedLooseUnits} tabs to deduct',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        color: Color(0xFFDC2626),
+                      ),
+                    ),
+                    Text(
+                      isStrip
+                          ? '(${line.quantity} strips × ${line.unitsPerPack} tabs)'
+                          : (isTablet ? '(${line.quantity} loose tablets)' : 'Unit unconfirmed'),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
+                );
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: isNarrow
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            qtyAndUnitRow,
+                            const SizedBox(height: 6),
+                            deductionInfo,
+                          ],
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            qtyAndUnitRow,
+                            const SizedBox(width: 8),
+                            Flexible(child: deductionInfo),
+                          ],
+                        ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConfidenceBadge(double score) {
+    final bool isHigh = score >= 0.85;
+    final bool isMed = score >= 0.60;
+
+    final Color bg = isHigh
+        ? const Color(0xFFECFDF5)
+        : (isMed ? const Color(0xFFFFFBEB) : const Color(0xFFFEF2F2));
+    final Color fg = isHigh
+        ? const Color(0xFF059669)
+        : (isMed ? const Color(0xFFD97706) : AppColors.dangerFg);
+    final String label = isHigh ? 'High match' : (isMed ? 'Medium match' : 'Unmatched');
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isHigh ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+            size: 11,
+            color: fg,
+          ),
+          const SizedBox(width: 3.5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: fg,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQuickUnitButton(String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+        decoration: BoxDecoration(
+          color: const Color(0xFFD97706),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        ),
       ),
     );
   }
@@ -530,19 +551,19 @@ class _SalesLineCardState extends State<SalesLineCard> {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(5),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: isSelected ? AppColors.matchaDeep : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(5),
         ),
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-            color: isSelected ? Colors.white : AppColors.inkSoft,
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            color: isSelected ? Colors.white : const Color(0xFF475569),
           ),
         ),
       ),

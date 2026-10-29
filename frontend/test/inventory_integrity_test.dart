@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pharmacy_app/core/models/goods_receipt.dart';
+import 'package:pharmacy_app/core/models/medicine.dart';
+import 'package:pharmacy_app/core/models/batch.dart';
+import 'package:pharmacy_app/core/models/purchase_order.dart';
 import 'package:pharmacy_app/core/services/mock_data_service.dart';
 import 'package:pharmacy_app/features/sales/models/sales_report.dart';
 
@@ -9,6 +12,49 @@ void main() {
 
     setUp(() {
       service = MockDataService();
+      service.addMedicine(
+        Medicine(
+          productId: 'MED-000101',
+          name: 'Dolo 650mg',
+          genericName: 'Paracetamol',
+          strength: '650mg',
+          form: 'Tablet',
+          category: 'Analgesics',
+          manufacturer: 'Micro Labs',
+          packUnit: 'strip',
+          saleUnit: 'tablet',
+          unitsPerPack: 15,
+          currentStock: 100,
+          lowStockThreshold: 20,
+          batches: [
+            MedicineBatch(
+              batchNumber: 'DL-91',
+              expiryDate: DateTime(2028, 12, 31),
+              quantity: 100,
+            ),
+          ],
+        ),
+      );
+      if (service.purchaseOrders.isEmpty) {
+        service.addPurchaseOrder(
+          PurchaseOrder(
+            id: 'po-test-01',
+            purchaseOrderNumber: 'PO-2026-TEST',
+            supplierId: 'SUP-000001',
+            supplierName: 'Test Supplier',
+            status: POStatus.sent,
+            items: [
+              const POLineItem(
+                lineId: 'line-1',
+                productId: 'MED-000101',
+                productName: 'Dolo 650mg',
+                unitOfPurchase: 'strip',
+                orderedQuantity: 10,
+              ),
+            ],
+          ),
+        );
+      }
     });
 
     test('Member 2: Medicine unit conversion calculation', () {

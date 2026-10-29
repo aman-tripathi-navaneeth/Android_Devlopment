@@ -65,37 +65,200 @@ class SupplierPOService:
     # -------------------------------------------------------------------------
     # SUPPLIERS
     # -------------------------------------------------------------------------
+    async def _ensure_seed_suppliers(self, store_id: str) -> None:
+        if store_id != "main_store":
+            return
+        if self.db is not None:
+            cursor = self.db.suppliers.find({"store_id": store_id})
+            existing = await cursor.to_list(1)
+            if not existing:
+                samples = [
+                    {
+                        "id": "sup-1",
+                        "store_id": store_id,
+                        "code": "SUP-000001",
+                        "name": "Sri Venkateswara Pharma Distributors",
+                        "contact_person": "K. Ramesh",
+                        "phone": "9848012345",
+                        "email": "ramesh@venkateswarapharma.in",
+                        "address": "Shop 14, Main Road, Governorpet, Vijayawada, AP",
+                        "city": "Vijayawada",
+                        "gst_number": "37AAAAA0000A1Z5",
+                        "payment_terms": "Net 30",
+                        "notes": None,
+                        "active": True,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                    },
+                    {
+                        "id": "sup-2",
+                        "store_id": store_id,
+                        "code": "SUP-000002",
+                        "name": "Apollo Med Wholesale Agency",
+                        "contact_person": "V. Suresh Kumar",
+                        "phone": "9440167890",
+                        "email": "orders@apollomedwholesale.com",
+                        "address": "Plot 42, IDA Mallapur, Hyderabad, TS",
+                        "city": "Hyderabad",
+                        "gst_number": "36BBBBB1111B2Z4",
+                        "payment_terms": "Net 15",
+                        "notes": None,
+                        "active": True,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                    },
+                    {
+                        "id": "sup-3",
+                        "store_id": store_id,
+                        "code": "SUP-000003",
+                        "name": "Balaji Drug Agencies",
+                        "contact_person": "M. Srinivas",
+                        "phone": "9885054321",
+                        "email": "balajidrugs@gmail.com",
+                        "address": "Brodipet 4th Lane, Guntur, AP",
+                        "city": "Guntur",
+                        "gst_number": "37CCCCC2222C3Z3",
+                        "payment_terms": "Net 21",
+                        "notes": None,
+                        "active": True,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                    },
+                    {
+                        "id": "sup-4",
+                        "store_id": store_id,
+                        "code": "SUP-000004",
+                        "name": "Reddy & Sons Pharmaceuticals",
+                        "contact_person": "P. Venkat Reddy",
+                        "phone": "9700098765",
+                        "email": "reddysons@pharma.biz",
+                        "address": "Daba Gardens, Visakhapatnam, AP",
+                        "city": "Visakhapatnam",
+                        "gst_number": "37DDDDD3333D4Z2",
+                        "payment_terms": "Immediate",
+                        "notes": None,
+                        "active": False,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                    },
+                ]
+                for s in samples:
+                    await self.db.suppliers.insert_one(s)
+        else:
+            if not fallback_store.suppliers:
+                fallback_store.suppliers = {
+                    "sup-1": {
+                        "id": "sup-1",
+                        "store_id": store_id,
+                        "code": "SUP-000001",
+                        "name": "Sri Venkateswara Pharma Distributors",
+                        "contact_person": "K. Ramesh",
+                        "phone": "9848012345",
+                        "email": "ramesh@venkateswarapharma.in",
+                        "address": "Shop 14, Main Road, Governorpet, Vijayawada, AP",
+                        "city": "Vijayawada",
+                        "gst_number": "37AAAAA0000A1Z5",
+                        "payment_terms": "Net 30",
+                        "notes": None,
+                        "active": True,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                    },
+                    "sup-2": {
+                        "id": "sup-2",
+                        "store_id": store_id,
+                        "code": "SUP-000002",
+                        "name": "Apollo Med Wholesale Agency",
+                        "contact_person": "V. Suresh Kumar",
+                        "phone": "9440167890",
+                        "email": "orders@apollomedwholesale.com",
+                        "address": "Plot 42, IDA Mallapur, Hyderabad, TS",
+                        "city": "Hyderabad",
+                        "gst_number": "36BBBBB1111B2Z4",
+                        "payment_terms": "Net 15",
+                        "notes": None,
+                        "active": True,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                    },
+                    "sup-3": {
+                        "id": "sup-3",
+                        "store_id": store_id,
+                        "code": "SUP-000003",
+                        "name": "Balaji Drug Agencies",
+                        "contact_person": "M. Srinivas",
+                        "phone": "9885054321",
+                        "email": "balajidrugs@gmail.com",
+                        "address": "Brodipet 4th Lane, Guntur, AP",
+                        "city": "Guntur",
+                        "gst_number": "37CCCCC2222C3Z3",
+                        "payment_terms": "Net 21",
+                        "notes": None,
+                        "active": True,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                    },
+                    "sup-4": {
+                        "id": "sup-4",
+                        "store_id": store_id,
+                        "code": "SUP-000004",
+                        "name": "Reddy & Sons Pharmaceuticals",
+                        "contact_person": "P. Venkat Reddy",
+                        "phone": "9700098765",
+                        "email": "reddysons@pharma.biz",
+                        "address": "Daba Gardens, Visakhapatnam, AP",
+                        "city": "Visakhapatnam",
+                        "gst_number": "37DDDDD3333D4Z2",
+                        "payment_terms": "Immediate",
+                        "notes": None,
+                        "active": False,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                    },
+                }
+
     async def get_next_supplier_code(self, store_id: str) -> str:
         if self.db is not None:
-            res = await self.db.counters.find_one_and_update(
-                {"_id": f"supplier_code_{store_id}"},
-                {"$inc": {"seq": 1}},
-                upsert=True,
-                return_document=True,
-            )
-            seq = res["seq"] if res else 1
-            return f"SUP-{seq:06d}"
+            cursor = self.db.suppliers.find({"store_id": store_id})
+            docs = await cursor.to_list(1000)
+            max_num = 0
+            for d in docs:
+                code_str = str(d.get("code") or "")
+                if code_str.startswith("SUP-"):
+                    try:
+                        num = int(code_str.replace("SUP-", ""))
+                        if num > max_num:
+                            max_num = num
+                    except ValueError:
+                        pass
+            next_num = max(max_num + 1, 1)
+            return f"SUP-{next_num:06d}"
         else:
             fallback_store.counters["supplier_code"] += 1
             return f"SUP-{fallback_store.counters['supplier_code']:06d}"
 
     async def create_supplier(self, store_id: str, payload: SupplierCreate) -> SupplierOut:
+        await self._ensure_seed_suppliers(store_id)
         code = payload.code
         if not code or not code.strip():
             code = await self.get_next_supplier_code(store_id)
 
+        clean_name = payload.name.strip()
+        clean_phone = payload.phone.strip()
         supplier_id = str(uuid.uuid4())
         now = _now()
         data = {
             "id": supplier_id,
             "store_id": store_id,
             "code": code,
-            "name": payload.name.strip(),
-            "contact_person": payload.contact_person.strip(),
-            "phone": payload.phone.strip(),
+            "name": clean_name,
+            "contact_person": (payload.contact_person or "").strip() or clean_name,
+            "phone": clean_phone,
             "email": payload.email.strip() if payload.email else None,
             "address": payload.address.strip() if payload.address else None,
-            "payment_terms": payload.payment_terms.strip(),
+            "city": payload.city.strip() if payload.city else None,
+            "gst_number": payload.gst_number.strip().upper() if payload.gst_number else None,
+            "payment_terms": payload.payment_terms.strip() if payload.payment_terms else "Net 30",
             "notes": payload.notes.strip() if payload.notes else None,
             "active": True,
             "created_at": now,
@@ -104,19 +267,33 @@ class SupplierPOService:
 
         if self.db is not None:
             # Check duplicate code in same store
-            existing = await self.db.suppliers.find_one({"store_id": store_id, "code": code})
-            if existing:
-                raise HTTPException(status_code=409, detail={"code": "DUPLICATE_SUPPLIER_CODE", "message": f"Supplier code {code} already exists"})
+            existing_code = await self.db.suppliers.find_one({"store_id": store_id, "code": code})
+            if existing_code:
+                raise HTTPException(status_code=409, detail={"code": "DUPLICATE_SUPPLIER_CODE", "message": f"Supplier with code '{code}' already exists."})
+            # Check duplicate phone in same store
+            existing_phone = await self.db.suppliers.find_one({"store_id": store_id, "phone": clean_phone})
+            if existing_phone:
+                raise HTTPException(status_code=409, detail={"code": "DUPLICATE_SUPPLIER_PHONE", "message": f"Supplier with phone '{clean_phone}' already exists ({existing_phone.get('name')})."})
+            # Check duplicate name in same store
+            existing_name = await self.db.suppliers.find_one({"store_id": store_id, "name": clean_name})
+            if existing_name:
+                raise HTTPException(status_code=409, detail={"code": "DUPLICATE_SUPPLIER_NAME", "message": f"Supplier '{clean_name}' already exists."})
             await self.db.suppliers.insert_one(data)
         else:
             for s in fallback_store.suppliers.values():
-                if s["store_id"] == store_id and s["code"] == code:
-                    raise HTTPException(status_code=409, detail={"code": "DUPLICATE_SUPPLIER_CODE", "message": f"Supplier code {code} already exists"})
+                if s["store_id"] == store_id:
+                    if s["code"] == code:
+                        raise HTTPException(status_code=409, detail={"code": "DUPLICATE_SUPPLIER_CODE", "message": f"Supplier with code '{code}' already exists."})
+                    if s["phone"] == clean_phone:
+                        raise HTTPException(status_code=409, detail={"code": "DUPLICATE_SUPPLIER_PHONE", "message": f"Supplier with phone '{clean_phone}' already exists ({s.get('name')})."})
+                    if s["name"].lower() == clean_name.lower():
+                        raise HTTPException(status_code=409, detail={"code": "DUPLICATE_SUPPLIER_NAME", "message": f"Supplier '{clean_name}' already exists."})
             fallback_store.suppliers[supplier_id] = data
 
         return SupplierOut(**data)
 
     async def list_suppliers(self, store_id: str, active_only: bool = False) -> list[SupplierOut]:
+        await self._ensure_seed_suppliers(store_id)
         if self.db is not None:
             query: dict[str, Any] = {"store_id": store_id}
             if active_only:
@@ -133,6 +310,7 @@ class SupplierPOService:
             return items
 
     async def get_supplier(self, store_id: str, supplier_id: str) -> SupplierOut:
+        await self._ensure_seed_suppliers(store_id)
         if self.db is not None:
             data = await self.db.suppliers.find_one({"store_id": store_id, "id": supplier_id})
         else:

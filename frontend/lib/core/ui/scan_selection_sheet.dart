@@ -12,33 +12,24 @@ class ScanSelectionSheet extends StatelessWidget {
   const ScanSelectionSheet({super.key});
 
   static Future<void> show(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final isWide = mediaQuery.size.width >= 600;
-
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final sheet = const ScanSelectionSheet();
-        if (isWide) {
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: sheet,
-            ),
-          );
-        }
-        return sheet;
-      },
+      builder: (ctx) => Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: const ScanSelectionSheet(),
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
-    final mediaQuery = MediaQuery.of(context);
 
     return Container(
       decoration: const BoxDecoration(
@@ -47,115 +38,111 @@ class ScanSelectionSheet extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: mediaQuery.size.height * 0.85),
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Drag handle
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.outline,
-                      borderRadius: BorderRadius.circular(2),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.outline,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // Sheet title & subtitle per Section 4.3
+              Text(
+                strings.whatWouldYouLikeToScan,
+                style: AppTypography.screenTitle,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                strings.chooseDocumentType,
+                style: AppTypography.caption.copyWith(
+                  color: AppColors.inkSoft,
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Card 1: Purchase Invoice (Stock In)
+              _buildScanOptionCard(
+                context: context,
+                title: strings.purchaseInvoice,
+                subtitle: strings.addReceivedStockFromSupplier,
+                badgeLabel: strings.stockIn,
+                badgeBg: AppColors.matcha.withValues(alpha: 0.25),
+                badgeFg: AppColors.matchaDeep,
+                icon: Icons.receipt_long_rounded,
+                iconBg: AppColors.matcha.withValues(alpha: 0.2),
+                iconFg: AppColors.matchaDeep,
+                borderColor: AppColors.matcha,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const CameraCaptureScreen(
+                        scanType: DocumentScanType.invoice,
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 18),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
 
-                // Sheet title & subtitle per Section 4.3
-                Text(
-                  strings.whatWouldYouLikeToScan,
-                  style: AppTypography.screenTitle,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  strings.chooseDocumentType,
-                  style: AppTypography.caption.copyWith(
-                    color: AppColors.inkSoft,
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Card 1: Purchase Invoice (Stock In)
-                _buildScanOptionCard(
-                  context: context,
-                  title: strings.purchaseInvoice,
-                  subtitle: strings.addReceivedStockFromSupplier,
-                  badgeLabel: strings.stockIn,
-                  badgeBg: AppColors.matcha.withValues(alpha: 0.25),
-                  badgeFg: AppColors.matchaDeep,
-                  icon: Icons.receipt_long_rounded,
-                  iconBg: AppColors.matcha.withValues(alpha: 0.2),
-                  iconFg: AppColors.matchaDeep,
-                  borderColor: AppColors.matcha,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const CameraCaptureScreen(
-                          scanType: DocumentScanType.invoice,
-                        ),
+              // Card 2: Sales Report / Bill Scan (Stock Out)
+              _buildScanOptionCard(
+                context: context,
+                title: strings.salesReport,
+                subtitle: strings.recordSoldMedicines,
+                badgeLabel: strings.stockOut,
+                badgeBg: AppColors.chai.withValues(alpha: 0.35),
+                badgeFg: AppColors.carob,
+                icon: Icons.point_of_sale_rounded,
+                iconBg: AppColors.chai.withValues(alpha: 0.25),
+                iconFg: AppColors.carob,
+                borderColor: AppColors.chai,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const CameraCaptureScreen(
+                        scanType: DocumentScanType.salesReport,
                       ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
 
-                // Card 2: Sales Report (Stock Out)
-                _buildScanOptionCard(
-                  context: context,
-                  title: strings.salesReport,
-                  subtitle: strings.recordSoldMedicines,
-                  badgeLabel: strings.stockOut,
-                  badgeBg: AppColors.chai.withValues(alpha: 0.35),
-                  badgeFg: AppColors.carob,
-                  icon: Icons.point_of_sale_rounded,
-                  iconBg: AppColors.chai.withValues(alpha: 0.25),
-                  iconFg: AppColors.carob,
-                  borderColor: AppColors.chai,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const CameraCaptureScreen(
-                          scanType: DocumentScanType.salesReport,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-
-                // Card 3: Manual Transaction (Stock Out)
-                _buildScanOptionCard(
-                  context: context,
-                  title: strings.manualTransaction,
-                  subtitle: strings.manualTransactionSubtitle,
-                  badgeLabel: strings.stockOut,
-                  badgeBg: AppColors.pistache.withValues(alpha: 0.35),
-                  badgeFg: AppColors.matchaDeep,
-                  icon: Icons.edit_note_rounded,
-                  iconBg: AppColors.pistache.withValues(alpha: 0.28),
-                  iconFg: AppColors.matchaDeep,
-                  borderColor: AppColors.pistache,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const ManualTransactionScreen(),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
+              // Card 3: Manual Transaction (Stock Out)
+              _buildScanOptionCard(
+                context: context,
+                title: strings.manualTransaction,
+                subtitle: strings.manualTransactionSubtitle,
+                badgeLabel: strings.stockOut,
+                badgeBg: AppColors.pistache.withValues(alpha: 0.35),
+                badgeFg: AppColors.matchaDeep,
+                icon: Icons.edit_note_rounded,
+                iconBg: AppColors.pistache.withValues(alpha: 0.28),
+                iconFg: AppColors.matchaDeep,
+                borderColor: AppColors.pistache,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ManualTransactionScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
         ),
       ),

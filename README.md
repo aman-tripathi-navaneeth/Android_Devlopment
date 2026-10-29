@@ -25,6 +25,8 @@ Requires Python 3.11+ (use the version selected by the team if already standardi
 2. Install dependencies: `pip install -r requirements.txt`.
 3. Copy the root `.env.example` to `backend/.env` and set `POSTGRES_DSN` if you want to run with PostgreSQL.
 4. From `backend/`, run `uvicorn app.main:app --reload`.
+
+   Alternatively, start it from the repository root with `python run_backend.py`.
 5. Open `http://127.0.0.1:8000/docs`; check `http://127.0.0.1:8000/health` and `http://127.0.0.1:8000/ready`.
 6. Run `pytest` from `backend/`.
 

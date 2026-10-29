@@ -71,4 +71,63 @@ class Supplier {
       outstandingUnits: outstandingUnits ?? this.outstandingUnits,
     );
   }
+
+  factory Supplier.fromJson(Map<String, dynamic> json) {
+    return Supplier(
+      id: json['id']?.toString() ?? '',
+      supplierCode: json['supplier_code']?.toString() ??
+          json['code']?.toString() ??
+          'SUP-000000',
+      name: json['name']?.toString() ?? '',
+      contactPerson: json['contact_person']?.toString() ??
+          json['contactPerson']?.toString(),
+      phone: json['phone']?.toString() ?? '',
+      email: json['email']?.toString(),
+      address: json['address']?.toString(),
+      city: json['city']?.toString(),
+      notes: json['notes']?.toString(),
+      gstNumber: json['gst_number']?.toString() ??
+          json['gstNumber']?.toString(),
+      paymentTerms: json['payment_terms']?.toString() ??
+          json['paymentTerms']?.toString() ??
+          'Net 30',
+      isActive: json['is_active'] is bool
+          ? json['is_active'] as bool
+          : (json['active'] is bool
+              ? json['active'] as bool
+              : (json['isActive'] as bool? ?? true)),
+      openPurchaseOrderCount: json['open_purchase_order_count'] is num
+          ? (json['open_purchase_order_count'] as num).toInt()
+          : (json['openPurchaseOrderCount'] is num
+              ? (json['openPurchaseOrderCount'] as num).toInt()
+              : 0),
+      totalOrderValue: json['total_order_value'] is num
+          ? (json['total_order_value'] as num).toDouble()
+          : (json['totalOrderValue'] is num
+              ? (json['totalOrderValue'] as num).toDouble()
+              : 0.0),
+      outstandingUnits: json['outstanding_units'] is num
+          ? (json['outstanding_units'] as num).toInt()
+          : (json['outstandingUnits'] is num
+              ? (json['outstandingUnits'] as num).toInt()
+              : 0),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'supplier_code': supplierCode,
+      'name': name,
+      if (contactPerson != null) 'contact_person': contactPerson,
+      'phone': phone,
+      if (email != null) 'email': email,
+      if (address != null) 'address': address,
+      if (city != null) 'city': city,
+      if (notes != null) 'notes': notes,
+      if (gstNumber != null) 'gst_number': gstNumber,
+      if (paymentTerms != null) 'payment_terms': paymentTerms,
+      'is_active': isActive,
+    };
+  }
 }

@@ -7,6 +7,8 @@ import re
 import uuid
 from typing import Any, List, Optional
 from fastapi import HTTPException
+import json
+from pathlib import Path
 
 
 class CatalogueError(ValueError):
@@ -189,13 +191,38 @@ def manufacturer_warnings(candidate: dict, existing: list) -> list:
 # IN-MEMORY REPOSITORY & PERSISTENCE
 # ==============================================================================
 
+_FALLBACK_STORE_PATH = Path(__file__).resolve().parents[3] / "data" / "catalogue_store.json"
+
+
 class InMemoryCatalogueStore:
     def __init__(self):
         self.medicines: dict[str, dict[str, Any]] = {}
-        self.seed_sample_data()
+        self._load()
+        if not self.medicines:
+            self.seed_sample_data()
+            self._save()
+
+    def _load(self):
+        try:
+            if _FALLBACK_STORE_PATH.exists():
+                with open(_FALLBACK_STORE_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self.medicines = data
+        except Exception:
+            pass
+
+    def _save(self):
+        try:
+            _FALLBACK_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(_FALLBACK_STORE_PATH, "w", encoding="utf-8") as f:
+                json.dump(self.medicines, f, indent=2, default=str)
+        except Exception:
+            pass
 
     def clear(self):
         self.medicines.clear()
+        self._save()
 
     def seed_sample_data(self):
         samples = [
@@ -378,10 +405,20 @@ class CatalogueService:
             await products_col.insert_one(insert_doc)
         else:
             fallback_catalogue_store.medicines[med_id] = doc
+            fallback_catalogue_store._save()
 
         return {"id": med_id, "brand_name": doc["brand_name"], "warnings": warnings}
 
+    async def _ensure_seed_products(self) -> None:
+        if self.db is not None:
+            products_col = self.db["products"]
+            existing = await products_col.find({}).limit(1).to_list(1)
+            if not existing:
+                for s in fallback_catalogue_store.medicines.values():
+                    await products_col.insert_one(dict(s))
+
     async def get_medicine(self, product_id: str) -> Optional[dict]:
+        await self._ensure_seed_products()
         if self.db is not None:
             products_col = self.db["products"]
             conds: list[dict[str, Any]] = [{"id": product_id}, {"productId": product_id}]
@@ -389,6 +426,7 @@ class CatalogueService:
             if doc:
                 doc["id"] = str(doc.get("id") or doc.get("productId") or doc.get("_id"))
                 return doc
+            return None
         return fallback_catalogue_store.medicines.get(product_id)
 
     async def list_medicines(
@@ -399,6 +437,7 @@ class CatalogueService:
         form: Optional[str] = None,
         limit: int = 100,
     ) -> List[dict]:
+        await self._ensure_seed_products()
         if self.db is not None:
             products_col = self.db["products"]
             query: dict[str, Any] = {}
@@ -412,12 +451,11 @@ class CatalogueService:
                 query["form"] = form
             cursor = products_col.find(query).limit(limit)
             docs = await cursor.to_list(length=limit)
-            if docs:
-                out = []
-                for d in docs:
-                    d["id"] = str(d.get("id") or d.get("productId") or d.pop("_id", ""))
-                    out.append(d)
-                return out
+            out = []
+            for d in docs:
+                d["id"] = str(d.get("id") or d.get("productId") or d.pop("_id", ""))
+                out.append(d)
+            return out
 
         # In-memory store
         items = list(fallback_catalogue_store.medicines.values())
@@ -477,11 +515,13 @@ class CatalogueService:
 
         if self.db is not None:
             products_col = self.db["products"]
-            q = {"id": product_id}
+            q = {"$or": [{"id": product_id}, {"productId": product_id}]}
             await products_col.update_one(q, {"$set": updated_fields})
             return await self.get_medicine(product_id)  # type: ignore
 
         med.update(updated_fields)
+        fallback_catalogue_store.medicines[product_id] = med
+        fallback_catalogue_store._save()
         return med
 
     async def deactivate_medicine(self, product_id: str) -> dict:
@@ -496,9 +536,11 @@ class CatalogueService:
         }
         if self.db is not None:
             products_col = self.db["products"]
-            q = {"id": product_id}
+            q = {"$or": [{"id": product_id}, {"productId": product_id}]}
             await products_col.update_one(q, {"$set": updated_fields})
             return await self.get_medicine(product_id)  # type: ignore
 
         med.update(updated_fields)
+        fallback_catalogue_store.medicines[product_id] = med
+        fallback_catalogue_store._save()
         return med

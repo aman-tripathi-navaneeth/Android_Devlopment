@@ -4,7 +4,6 @@ import '../../../core/theme/colors.dart';
 import '../../../core/theme/text_styles.dart';
 import '../../../core/localization/app_localizations.dart';
 import '../../../core/ui/status_chip.dart';
-import '../../../core/ui/inline_banner.dart';
 import '../models/sales_report.dart';
 import '../services/mock_sales_ocr_adapter.dart';
 import 'sales_report_scan_screen.dart';
@@ -29,6 +28,7 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
   void initState() {
     super.initState();
     _ocrAdapter.addListener(_onAdapterUpdated);
+    _ocrAdapter.syncReportsFromBackend();
   }
 
   @override
@@ -69,53 +69,71 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
     return Scaffold(
       backgroundColor: AppColors.canvas,
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 12.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Golden Rule G4 Banner
-            InlineBanner(
-              type: BannerType.warning,
-              text: 'MANDATORY RULE G4: Scanning proposes. Staff verifies. Stock decreases ONLY after explicit staff review & confirmation.',
-            ),
-            const SizedBox(height: 12),
-
-            // Top Metric Strip
+            // Compact Rule G4 Notice
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.vanilla,
+                color: AppColors.chai.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.outline),
+                border: Border.all(color: AppColors.chai.withOpacity(0.35)),
               ),
               child: Row(
                 children: [
-                  _buildMetricItem('$postedCount', 'Posted Reports'),
-                  Container(
-                    width: 1,
-                    height: 32,
-                    color: AppColors.carob.withOpacity(0.2),
+                  const Icon(Icons.verified_user_outlined,
+                      color: AppColors.carob, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Rule G4: Scanning proposes, staff verifies. Stock deducts only upon explicit confirmation.',
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.carob,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
-                  _buildMetricItem(
-                    '${history.length - postedCount}',
-                    'Drafts / Pending',
-                  ),
-                  Container(
-                    width: 1,
-                    height: 32,
-                    color: AppColors.carob.withOpacity(0.2),
-                  ),
-                  _buildMetricItem('$totalUnitsDeducted', 'Units Deducted'),
                 ],
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
 
-            // Search Bar & Scan Action Button
+            // Top Metric Cards Row
+            Row(
+              children: [
+                _buildMetricCard(
+                  title: '$postedCount',
+                  subtitle: 'Posted',
+                  icon: Icons.check_circle_outline_rounded,
+                  accentColor: AppColors.matchaDeep,
+                ),
+                const SizedBox(width: 8),
+                _buildMetricCard(
+                  title: '${history.length - postedCount}',
+                  subtitle: 'Pending',
+                  icon: Icons.schedule_rounded,
+                  accentColor: AppColors.carob,
+                ),
+                const SizedBox(width: 8),
+                _buildMetricCard(
+                  title: '$totalUnitsDeducted',
+                  subtitle: 'Units Sold',
+                  icon: Icons.medication_outlined,
+                  accentColor: AppColors.matchaDeep,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Search Bar & Scan Button
             Row(
               children: [
                 Expanded(
                   child: Container(
+                    height: 42,
                     decoration: BoxDecoration(
                       color: AppColors.surface,
                       borderRadius: BorderRadius.circular(10),
@@ -124,13 +142,11 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
                     child: TextField(
                       decoration: const InputDecoration(
                         hintText: 'Search report reference, authorizer...',
-                        prefixIcon: Icon(Icons.search_rounded, size: 20),
+                        hintStyle: TextStyle(fontSize: 12, color: AppColors.inkSoft),
+                        prefixIcon: Icon(Icons.search_rounded, size: 18, color: AppColors.inkSoft),
                         border: InputBorder.none,
                         isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 10,
-                        ),
+                        contentPadding: EdgeInsets.symmetric(vertical: 11),
                       ),
                       onChanged: (val) {
                         setState(() => _searchQuery = val.trim());
@@ -138,20 +154,19 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
                     backgroundColor: AppColors.matchaDeep,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 11,
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    minimumSize: const Size(0, 42),
                   ),
-                  icon: const Icon(Icons.document_scanner_rounded, size: 18),
+                  icon: const Icon(Icons.document_scanner_rounded, size: 16),
                   label: const Text(
-                    '+ Scan Report',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                    '+ Scan',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                   ),
                   onPressed: () {
                     Navigator.of(context).push(
@@ -165,7 +180,7 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
             ),
             const SizedBox(height: 10),
 
-            // Status Filter Chips
+            // Filter Chips
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -173,32 +188,22 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
                   _buildFilterChip(
                     'All (${history.length})',
                     _statusFilter == null,
-                    () {
-                      setState(() => _statusFilter = null);
-                    },
+                    () => setState(() => _statusFilter = null),
                   ),
                   _buildFilterChip(
                     'Posted ($postedCount)',
                     _statusFilter == SalesReportStatus.posted,
-                    () {
-                      setState(() => _statusFilter = SalesReportStatus.posted);
-                    },
+                    () => setState(() => _statusFilter = SalesReportStatus.posted),
                   ),
                   _buildFilterChip(
                     'Pending Review',
                     _statusFilter == SalesReportStatus.pendingReview,
-                    () {
-                      setState(
-                        () => _statusFilter = SalesReportStatus.pendingReview,
-                      );
-                    },
+                    () => setState(() => _statusFilter = SalesReportStatus.pendingReview),
                   ),
                   _buildFilterChip(
                     'Drafts',
                     _statusFilter == SalesReportStatus.draft,
-                    () {
-                      setState(() => _statusFilter = SalesReportStatus.draft);
-                    },
+                    () => setState(() => _statusFilter = SalesReportStatus.draft),
                   ),
                   if (_statusFilter != null || _searchQuery.isNotEmpty)
                     TextButton(
@@ -210,46 +215,54 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
                       },
                       child: Text(
                         strings.clearFilters,
-                        style: const TextStyle(fontSize: 11),
+                        style: const TextStyle(fontSize: 11, color: AppColors.matchaDeep),
                       ),
                     ),
                 ],
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
 
             // History List
             Expanded(
-              child: filtered.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+              child: RefreshIndicator(
+                onRefresh: () => _ocrAdapter.syncReportsFromBackend(),
+                child: filtered.isEmpty
+                    ? ListView(
                         children: [
-                          const Icon(
-                            Icons.receipt_long_outlined,
-                            size: 48,
-                            color: AppColors.inkSoft,
-                          ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'No sales reports match your search or filters.',
-                            style: AppTypography.bodyStrong,
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Import an end-of-day sales register using the button above.',
-                            style: AppTypography.caption,
+                          const SizedBox(height: 60),
+                          Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.receipt_long_outlined,
+                                  size: 48,
+                                  color: AppColors.inkSoft,
+                                ),
+                                const SizedBox(height: 12),
+                                const Text(
+                                  'No sales reports match your search or filters.',
+                                  style: AppTypography.bodyStrong,
+                                ),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Pull down to refresh or register a new counter sale.',
+                                  style: AppTypography.caption,
+                                ),
+                              ],
+                            ),
                           ),
                         ],
+                      )
+                    : ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (ctx, index) {
+                          final report = filtered[index];
+                          return _buildReportHistoryCard(report);
+                        },
                       ),
-                    )
-                  : ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (ctx, index) {
-                        final report = filtered[index];
-                        return _buildReportHistoryCard(report);
-                      },
-                    ),
+              ),
             ),
           ],
         ),
@@ -257,28 +270,61 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
     );
   }
 
-  Widget _buildMetricItem(String val, String label) {
+  Widget _buildMetricCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color accentColor,
+  }) {
     return Expanded(
-      child: Column(
-        children: [
-          Text(
-            val,
-            style: AppTypography.tabularNumbers.copyWith(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: AppColors.carob,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.outline),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: accentColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: accentColor, size: 16),
             ),
-          ),
-          const SizedBox(height: 1),
-          Text(
-            label,
-            style: AppTypography.caption.copyWith(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTypography.tabularNumbers.copyWith(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.carob,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    subtitle,
+                    style: AppTypography.caption.copyWith(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.inkSoft,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -290,16 +336,16 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
         label: Text(label),
         selected: isSelected,
         onSelected: (_) => onTap(),
-        selectedColor: AppColors.matcha,
-        checkmarkColor: AppColors.ink,
+        selectedColor: AppColors.matcha.withOpacity(0.35),
+        checkmarkColor: AppColors.matchaDeep,
         labelStyle: TextStyle(
           fontSize: 11,
           fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-          color: isSelected ? AppColors.ink : AppColors.inkSoft,
+          color: isSelected ? AppColors.matchaDeep : AppColors.inkSoft,
         ),
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(20),
           side: BorderSide(
             color: isSelected ? AppColors.matchaDeep : AppColors.outline,
           ),
@@ -311,23 +357,18 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
   Widget _buildReportHistoryCard(SalesReport report) {
     final bool isPosted = report.status == SalesReportStatus.posted;
     final int units = report.totalLooseUnitsDeducted;
+    final dateStr =
+        '${report.reportDate.day.toString().padLeft(2, '0')}/${report.reportDate.month.toString().padLeft(2, '0')}/${report.reportDate.year}';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.outline),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         onTap: () {
           if (isPosted) {
             Navigator.of(context).push(
@@ -336,7 +377,6 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
               ),
             );
           } else {
-            // Resume review
             Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => SalesReportScanScreen(initialDraft: report),
@@ -345,39 +385,48 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
           }
         },
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Top Row: Type Pill + Reference + Date + Status
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.almond,
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: Text(
-                          report.reportReference,
-                          style: AppTypography.bodyStrong.copyWith(
-                            color: AppColors.carob,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: report.isCounterSale
+                          ? AppColors.matchaDeep.withOpacity(0.12)
+                          : AppColors.chai.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      report.isCounterSale ? 'Counter Sale' : 'Register Scan',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: report.isCounterSale ? AppColors.matchaDeep : AppColors.carob,
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${report.reportDate.day}/${report.reportDate.month}/${report.reportDate.year}',
-                        style: AppTypography.caption,
-                      ),
-                    ],
+                    ),
                   ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      report.reportReference,
+                      style: AppTypography.bodyStrong.copyWith(
+                        color: AppColors.carob,
+                        fontSize: 11.5,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    dateStr,
+                    style: AppTypography.caption.copyWith(fontSize: 10.5),
+                  ),
+                  const SizedBox(width: 6),
                   StatusChip(
                     status: isPosted
                         ? StatusType.posted
@@ -390,29 +439,35 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
               ),
               const SizedBox(height: 8),
 
+              // Middle Row: Line summary & Operator
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '${report.lines.length} lines • $units loose units deducted',
-                    style: AppTypography.bodyStrong.copyWith(fontSize: 13),
+                  Expanded(
+                    child: Text(
+                      '${report.lines.length} items • $units units deducted',
+                      style: AppTypography.bodyStrong.copyWith(fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   Text(
                     'By: ${report.authorizer}',
                     style: AppTypography.caption.copyWith(
                       color: AppColors.inkSoft,
+                      fontSize: 11,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
 
-              if (report.unresolvedLinesCount > 0) ...[
+              // Only show manual match warning if the report is actually UNRESOLVED and NOT posted
+              if (report.unresolvedLinesCount > 0 && !isPosted) ...[
                 const SizedBox(height: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: AppColors.dangerBg,
                     borderRadius: BorderRadius.circular(4),
@@ -428,34 +483,57 @@ class _SalesHubScreenState extends State<SalesHubScreen> {
                 ),
               ],
 
-              const Divider(height: 14),
+              const SizedBox(height: 8),
+              const Divider(height: 1, color: AppColors.outline),
+              const SizedBox(height: 8),
 
+              // Bottom Row: Txn Reference & View Details action
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    report.transactionReference ??
-                        'Draft (No stock deducted yet)',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: isPosted ? FontWeight.w700 : FontWeight.w500,
-                      color: isPosted
-                          ? AppColors.matchaDeep
-                          : AppColors.inkSoft,
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          isPosted ? Icons.check_circle_rounded : Icons.pending_outlined,
+                          size: 13,
+                          color: isPosted ? AppColors.matchaDeep : AppColors.inkSoft,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            isPosted
+                                ? (report.transactionReference != null
+                                    ? 'Txn: ${report.transactionReference}'
+                                    : 'Stock Deducted • Posted')
+                                : 'Draft (No stock deducted yet)',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: isPosted ? FontWeight.w700 : FontWeight.w500,
+                              color: isPosted ? AppColors.matchaDeep : AppColors.inkSoft,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         isPosted ? 'View Details' : 'Resume Review',
                         style: AppTypography.caption.copyWith(
                           fontWeight: FontWeight.w800,
                           color: AppColors.matchaDeep,
+                          fontSize: 11,
                         ),
                       ),
                       const Icon(
                         Icons.chevron_right_rounded,
-                        size: 16,
+                        size: 14,
                         color: AppColors.matchaDeep,
                       ),
                     ],

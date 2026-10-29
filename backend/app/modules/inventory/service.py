@@ -787,8 +787,8 @@ class InventoryService:
                     "match_type": "EXACT_ID",
                     "quantity_entered": item.quantity_entered,
                     "unit_entered": item.unit_entered,
-                    "base_unit": "tablet",
-                    "converted_base_quantity": item.quantity_entered,
+                    "base_unit": prepared_lines[idx - 1].get("base_unit", "tablet"),
+                    "converted_base_quantity": prepared_lines[idx - 1].get("base_units", item.quantity_entered),
                     "is_manually_resolved": True,
                 }
                 for idx, item in enumerate(request.items, start=1)

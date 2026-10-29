@@ -170,6 +170,50 @@ class SalesLineItem {
       validationError: validationError ?? this.validationError,
     );
   }
+
+  /// Parse a line from backend inventory deduction records.
+  factory SalesLineItem.fromBackendJson(Map<String, dynamic> json, int index) {
+    final qty = json['quantity_deducted'] is num
+        ? (json['quantity_deducted'] as num).toInt()
+        : (json['converted_base_quantity'] is num
+            ? (json['converted_base_quantity'] as num).toInt()
+            : (json['quantity_entered'] is num
+                ? (json['quantity_entered'] as num).toInt()
+                : (json['quantity'] is num ? (json['quantity'] as num).toInt() : 1)));
+    final unit = json['base_unit']?.toString() ??
+        json['unit_entered']?.toString() ??
+        'tablets';
+    final productId = json['product_id']?.toString() ??
+        json['matched_product_id']?.toString() ??
+        'PROD-$index';
+    final productName = json['product_name']?.toString() ??
+        json['medicine_name']?.toString() ??
+        json['matched_brand_name']?.toString() ??
+        'Medicine';
+    final batch = json['batch_number']?.toString() ??
+        json['batch_allocated']?.toString() ??
+        json['batch_preference']?.toString();
+
+    return SalesLineItem(
+      id: '${json['id']?.toString() ?? 'line'}-$index',
+      originalOcrText: json['original_text']?.toString() ??
+          json['raw_text']?.toString() ??
+          '$productName $qty $unit',
+      matchedProductId: productId,
+      matchedProductName: productName,
+      genericName: json['generic_name']?.toString() ?? productName,
+      confidenceScore: 1.0,
+      quantity: qty,
+      unit: unit,
+      batchNumber: batch,
+      batchAllocationRule: batch != null ? 'FEFO (Batch $batch)' : 'FEFO',
+      unitsPerPack: json['units_per_pack'] is num
+          ? (json['units_per_pack'] as num).toInt()
+          : 1,
+      packUnit: json['pack_unit']?.toString() ?? unit,
+      reviewStatus: SalesLineReviewStatus.accepted,
+    );
+  }
 }
 
 /// Outward Sales Report Model
@@ -186,6 +230,8 @@ class SalesReport {
   String? transactionReference; // e.g. TXN-OUT-2026-1013-01
   final bool isSimulated;
   final String? notes;
+  /// True when this report was loaded from the backend (counter sale)
+  final bool isCounterSale;
 
   SalesReport({
     required this.id,
@@ -200,6 +246,7 @@ class SalesReport {
     this.transactionReference,
     this.isSimulated = true,
     this.notes,
+    this.isCounterSale = false,
   }) : importTimestamp = importTimestamp ?? DateTime.now();
 
   int get totalLines => lines.length;
@@ -212,6 +259,83 @@ class SalesReport {
       lines.fold<int>(0, (sum, l) => sum + l.calculatedLooseUnits);
 
   bool get isReadyToPost => lines.isNotEmpty && unresolvedLinesCount == 0;
+
+  /// Parse a backend salesReport document from JSONB.
+  factory SalesReport.fromBackendJson(Map<String, dynamic> json) {
+    // Status mapping
+    SalesReportStatus parseStatus(String? s) {
+      switch (s?.toLowerCase()) {
+        case 'posted':
+          return SalesReportStatus.posted;
+        case 'pending_review':
+          return SalesReportStatus.pendingReview;
+        case 'ready_to_post':
+          return SalesReportStatus.readyToPost;
+        case 'rejected':
+          return SalesReportStatus.rejected;
+        case 'failed':
+          return SalesReportStatus.failed;
+        default:
+          return SalesReportStatus.posted; // counter sales are posted immediately
+      }
+    }
+
+    final rawLines = json['lines'];
+    final List<SalesLineItem> parsedLines = [];
+    if (rawLines is List) {
+      for (int i = 0; i < rawLines.length; i++) {
+        final l = rawLines[i];
+        if (l is Map<String, dynamic>) {
+          parsedLines.add(SalesLineItem.fromBackendJson(l, i));
+        }
+      }
+    }
+
+    DateTime parseDate(String? s) {
+      if (s == null) return DateTime.now();
+      try {
+        return DateTime.parse(s).toLocal();
+      } catch (_) {
+        return DateTime.now();
+      }
+    }
+
+    final reportDateStr = json['report_date']?.toString() ?? json['sale_date']?.toString();
+    final createdAtStr = json['created_at']?.toString() ?? json['posted_at']?.toString();
+    final reportId = json['id']?.toString() ?? json['report_id']?.toString() ?? 'unknown';
+    final ref = json['report_reference']?.toString() ??
+        json['source_id']?.toString() ??
+        'COUNTER-$reportId';
+    final status = parseStatus(json['status']?.toString());
+    final txnRef = json['transaction_reference']?.toString() ??
+        json['transaction_id']?.toString() ??
+        json['source_number']?.toString() ??
+        json['source_id']?.toString() ??
+        (status == SalesReportStatus.posted ? ref : null);
+    final isCounterSale = json['source_type']?.toString() == 'COUNTER_SALE' ||
+        json['source_type']?.toString() == 'MANUAL_TRANSACTION' ||
+        json['file_name']?.toString() == 'Manual Counter Transaction' ||
+        json['file_name']?.toString() == 'Counter Sale' ||
+        json['report_type']?.toString() == 'counter_sale';
+
+    return SalesReport(
+      id: reportId,
+      reportReference: ref,
+      reportDate: parseDate(reportDateStr),
+      importTimestamp: parseDate(createdAtStr),
+      status: status,
+      selectedFileName: json['file_name']?.toString() ?? 'Counter Sale',
+      selectedFileSize: '—',
+      lines: parsedLines,
+      authorizer: json['verified_by']?.toString() ??
+          json['posted_by']?.toString() ??
+          'Pharmacist',
+      transactionReference: txnRef,
+      isSimulated: false,
+      notes: json['notes']?.toString(),
+      isCounterSale: isCounterSale,
+    );
+  }
 
   SalesReport copyWith({
     String? id,
@@ -226,6 +350,7 @@ class SalesReport {
     String? transactionReference,
     bool? isSimulated,
     String? notes,
+    bool? isCounterSale,
   }) {
     return SalesReport(
       id: id ?? this.id,
@@ -240,6 +365,8 @@ class SalesReport {
       transactionReference: transactionReference ?? this.transactionReference,
       isSimulated: isSimulated ?? this.isSimulated,
       notes: notes ?? this.notes,
+      isCounterSale: isCounterSale ?? this.isCounterSale,
     );
   }
 }
+

@@ -34,6 +34,12 @@
    - **Swagger UI**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
    - **Health Check**: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health)
 
+You can also start the backend from the repository root with:
+
+```bash
+python run_backend.py
+```
+
 ---
 
 ## 2. Running the Frontend (Flutter App)

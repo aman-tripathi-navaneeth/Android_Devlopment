@@ -11,6 +11,9 @@ import '../../../core/services/mock_data_service.dart';
 import '../../catalogue/widgets/medicine_picker_sheet.dart';
 import '../../camera/screens/camera_capture_screen.dart';
 import '../../../core/api/api_client.dart';
+import '../../sales/models/sales_report.dart';
+import '../../sales/services/mock_sales_ocr_adapter.dart';
+import '../../sales/screens/sales_hub_screen.dart';
 
 /// Data class representing an extracted invoice line with auditability & manual corrections
 class ExtractedInvoiceLine {
@@ -49,8 +52,14 @@ class ExtractedInvoiceLine {
 class InvoiceScanScreen extends StatefulWidget {
   final int initialViewMode;
   final Map<String, dynamic>? aiScanResponse;
+  final bool isStockOut;
 
-  const InvoiceScanScreen({super.key, this.initialViewMode = 0, this.aiScanResponse});
+  const InvoiceScanScreen({
+    super.key,
+    this.initialViewMode = 0,
+    this.aiScanResponse,
+    this.isStockOut = false,
+  });
 
   @override
   State<InvoiceScanScreen> createState() => _InvoiceScanScreenState();
@@ -65,14 +74,15 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
   late TextEditingController _dateController;
   late TextEditingController _supplierController;
   final String _authorizer = 'Aditya (Pharmacist)';
+  bool _isPostingInvoice = false;
 
   @override
   void initState() {
     super.initState();
     _viewMode = widget.initialViewMode;
-    _invNoController = TextEditingController();
-    _dateController = TextEditingController();
-    _supplierController = TextEditingController();
+    _invNoController = TextEditingController(text: 'INV-9032');
+    _dateController = TextEditingController(text: '2026-10-14');
+    _supplierController = TextEditingController(text: 'Sri Venkateswara Pharma');
     if (widget.aiScanResponse != null) _applyAiScanResponse(widget.aiScanResponse!);
   }
 
@@ -209,48 +219,112 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     });
   }
 
+  bool _isProcessingOcr = false;
+
   Future<void> _pickAndScanImage() async {
+    if (_isProcessingOcr) return;
     final image = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (image == null) return;
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sending image to Gemini for extraction...')),
+    setState(() => _isProcessingOcr = true);
+
+    try {
+      final bytes = await image.readAsBytes();
+      String mime = image.mimeType ?? '';
+      if (mime.isEmpty || mime == 'application/octet-stream') {
+        final ext = image.name.split('.').last.toLowerCase();
+        if (ext == 'png') {
+          mime = 'image/png';
+        } else if (ext == 'webp') {
+          mime = 'image/webp';
+        } else {
+          mime = 'image/jpeg';
+        }
+      }
+
+      final response = await ApiClient().scanDocumentImage(
+        imageBytes: bytes,
+        fileName: image.name,
+        mimeType: mime,
+        documentType: 'invoice',
       );
+      if (!mounted) return;
+      if (response == null) {
+        setState(() => _isProcessingOcr = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Gemini extraction failed. Check backend and API key.'),
+            backgroundColor: AppColors.dangerFg,
+          ),
+        );
+        return;
+      }
+      _applyAiScanResponse(response);
+      setState(() {
+        _isProcessingOcr = false;
+        _viewMode = 1;
+      });
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _isProcessingOcr = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invoice scan failed: ${e.message}'),
+            backgroundColor: AppColors.dangerFg,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isProcessingOcr = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error uploading invoice: $e'),
+            backgroundColor: AppColors.dangerFg,
+          ),
+        );
+      }
     }
-    final bytes = await image.readAsBytes();
-    final response = await ApiClient().scanDocumentImage(
-      imageBytes: bytes,
-      fileName: image.name,
-      mimeType: image.mimeType ?? 'image/jpeg',
-      documentType: 'invoice',
-    );
-    if (!mounted) return;
-    if (response == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Gemini extraction failed. Check the backend and API key.')),
-      );
-      return;
-    }
-    _applyAiScanResponse(response);
-    setState(() => _viewMode = 1);
   }
 
   void _applyAiScanResponse(Map<String, dynamic> response) {
-    final medicines = (response['medicines'] as List<dynamic>? ?? const []);
+    final invId = response['id']?.toString() ?? 'INV-${DateTime.now().millisecondsSinceEpoch % 100000}';
+    if (_invNoController.text.trim().isEmpty) {
+      _invNoController.text = invId;
+    }
+    if (_supplierController.text.trim().isEmpty) {
+      _supplierController.text = response['supplier_name']?.toString() ?? 'Sri Balaji Agencies';
+    }
+    if (_dateController.text.trim().isEmpty) {
+      final now = DateTime.now();
+      _dateController.text = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    }
+
+    final medicines = (response['items'] as List<dynamic>? ?? response['medicines'] as List<dynamic>? ?? const []);
     _lines
       ..clear()
       ..addAll(medicines.asMap().entries.map((entry) {
         final medicine = Map<String, dynamic>.from(entry.value as Map);
+        final matchedId = medicine['matched_product_id']?.toString() ?? '';
+        final matchedName = medicine['matched_product_name']?.toString() ?? medicine['medicine_name']?.toString() ?? '';
+        final conf = (medicine['confidence_score'] as num?)?.toDouble() ??
+            (matchedId.isNotEmpty ? 0.95 : 0.70);
+
+        final rawBatch = medicine['batch_number']?.toString() ?? '';
+        final batch = rawBatch.trim().isNotEmpty ? rawBatch.trim() : 'BAT-${DateTime.now().year}';
+
+        final rawExp = medicine['expiry_date']?.toString() ?? '';
+        final exp = rawExp.trim().isNotEmpty ? rawExp.trim() : '${DateTime.now().year + 2}-12';
+
         return ExtractedInvoiceLine(
           id: 'AI_${entry.key}_${DateTime.now().millisecondsSinceEpoch}',
-          originalOcrText: medicine['raw_text']?.toString() ?? medicine['medicine_name'].toString(),
-          matchedProductId: '',
-          matchedProductName: medicine['medicine_name']?.toString() ?? '',
-          confidence: 0.70,
-          quantity: (medicine['quantity'] as num?)?.toInt() ?? 0,
-          unit: medicine['unit']?.toString() ?? 'unknown',
-          batchNumber: medicine['batch_number']?.toString() ?? '',
-          expiryDate: medicine['expiry_date']?.toString() ?? '',
+          originalOcrText: medicine['raw_text']?.toString() ?? medicine['medicine_name']?.toString() ?? '',
+          matchedProductId: matchedId,
+          matchedProductName: matchedName,
+          confidence: conf,
+          quantity: (medicine['quantity'] as num?)?.toInt() ?? 1,
+          unit: medicine['quantity_unit']?.toString() ?? medicine['unit']?.toString() ?? 'strip',
+          batchNumber: batch,
+          expiryDate: exp,
           ratePaise: 0,
         );
       }));
@@ -258,12 +332,12 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    String title = 'Purchase Invoices (OCR Inward)';
+    String title = widget.isStockOut ? 'Sales Report (Stock Out)' : 'Purchase Invoices (OCR Inward)';
     if (_viewMode == 0) title = 'Upload Document';
     if (_viewMode == 1) title = 'Review Extracted Lines';
     if (_viewMode == 2) title = 'Match to Catalogue';
     if (_viewMode == 3) title = 'Confirm & Post';
-    if (_viewMode == 4) title = 'Stock Added Successfully';
+    if (_viewMode == 4) title = widget.isStockOut ? 'Stock Removed Successfully' : 'Stock Added Successfully';
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -539,11 +613,13 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Extracted Invoice Details',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13.5,
+                    const Expanded(
+                      child: Text(
+                        'Extracted Invoice Details',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5,
+                        ),
                       ),
                     ),
                     OutlinedButton(
@@ -618,9 +694,12 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                                     ),
                                   ),
                                 )
-                              : Text(
-                                  _invNoController.text,
-                                  style: AppTypography.bodyStrong,
+                              : Flexible(
+                                  child: Text(
+                                    _invNoController.text,
+                                    style: AppTypography.bodyStrong,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                         ],
                       ),
@@ -654,22 +733,28 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                                     ),
                                   ),
                                 )
-                              : Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.calendar_today_outlined,
-                                      size: 13,
-                                      color: AppColors.matchaDeep,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      _dateController.text,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 12,
+                              : Flexible(
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.calendar_today_outlined,
+                                        size: 13,
+                                        color: AppColors.matchaDeep,
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 5),
+                                      Flexible(
+                                        child: Text(
+                                          _dateController.text,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                         ],
                       ),
@@ -684,6 +769,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                               fontSize: 12,
                             ),
                           ),
+                          const SizedBox(width: 8),
                           _isEditingHeader
                               ? SizedBox(
                                   width: 170,
@@ -704,12 +790,15 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                                     ),
                                   ),
                                 )
-                              : Text(
-                                  _supplierController.text,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.matchaDeep,
-                                    fontSize: 12,
+                              : Flexible(
+                                  child: Text(
+                                    _supplierController.text,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.matchaDeep,
+                                      fontSize: 12,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                         ],
@@ -722,9 +811,11 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Extracted Items (${_lines.length})',
-                      style: AppTypography.section,
+                    Expanded(
+                      child: Text(
+                        'Extracted Items (${_lines.length})',
+                        style: AppTypography.section,
+                      ),
                     ),
                     TextButton.icon(
                       icon: const Icon(Icons.add_rounded, size: 16),
@@ -1228,17 +1319,19 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                     ),
                   ),
                   child: Row(
-                    children: const [
-                      Icon(
+                    children: [
+                      const Icon(
                         Icons.info_outline_rounded,
                         color: AppColors.matchaDeep,
                         size: 20,
                       ),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'This will add stock to inventory and create a goods receipt.',
-                          style: TextStyle(
+                          widget.isStockOut
+                              ? 'This will deduct stock from inventory and record in sales report.'
+                              : 'This will add stock to inventory and create a goods receipt.',
+                          style: const TextStyle(
                             color: AppColors.matchaDeep,
                             fontWeight: FontWeight.w600,
                             fontSize: 12,
@@ -1344,31 +1437,215 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                         )
                         .toList();
 
-                    final success = MockDataService()
-                        .recordPurchaseInvoiceInward(
-                          invoiceNumber: _invNoController.text.trim(),
-                          supplierName: _supplierController.text.trim(),
-                          items: items,
-                          authorizer: _authorizer,
-                        );
+                    final invNum = _invNoController.text.trim().isEmpty
+                        ? 'INV-${DateTime.now().millisecondsSinceEpoch % 100000}'
+                        : _invNoController.text.trim();
+                    final supplier = _supplierController.text.trim().isEmpty
+                        ? 'Sri Balaji Agencies'
+                        : _supplierController.text.trim();
 
-                    if (success) {
-                      setState(() => _viewMode = 4);
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Invoice ${_invNoController.text.trim()} already posted to inventory. Duplicate submission rejected.',
-                          ),
-                          backgroundColor: AppColors.dangerFg,
-                        ),
-                      );
-                    }
+                    final payload = {
+                      'source_type': 'PURCHASE_INVOICE',
+                      'source_id': invNum,
+                      'source_number': invNum,
+                      'verified_by': _authorizer,
+                      'items': _lines.map((l) {
+                        return {
+                          'product_id': l.matchedProductId.trim(),
+                          'product_name': l.matchedProductName.trim().isEmpty
+                              ? l.originalOcrText
+                              : l.matchedProductName.trim(),
+                          'batch_number': l.batchNumber.trim().isEmpty
+                              ? 'BAT-2026'
+                              : l.batchNumber.trim(),
+                          'expiry_date': l.expiryDate.trim(),
+                          'quantity_entered': l.quantity,
+                          'unit_entered': l.unit.trim().isNotEmpty
+                              ? l.unit.trim()
+                              : 'strip',
+                          'supplier_name': supplier,
+                        };
+                      }).toList(),
+                    };
+
+                    setState(() => _isPostingInvoice = true);
+                    () async {
+                      try {
+                        if (widget.isStockOut) {
+                          final saleTxnId = 'SR-SCAN-$invNum';
+                          final idempotencyKey = 'SALE-SCAN-$invNum-${DateTime.now().millisecondsSinceEpoch}';
+
+                          // 1. Post sales deduction to API
+                          try {
+                            await ApiClient().postSalesDeductionStrict(
+                              storeId: 'main_store',
+                              idempotencyKey: idempotencyKey,
+                              payload: {
+                                'source_type': 'SALES_REPORT',
+                                'source_id': idempotencyKey,
+                                'source_number': invNum,
+                                'posted_by': _authorizer,
+                                'items': _lines.map((l) => {
+                                  'product_id': l.matchedProductId.isNotEmpty ? l.matchedProductId : 'MED-000101',
+                                  'generic_name': l.matchedProductName,
+                                  'medicine_name': l.matchedProductName,
+                                  'quantity_entered': l.quantity,
+                                  'unit_entered': l.unit.isNotEmpty ? l.unit : 'tablet',
+                                }).toList(),
+                              },
+                            );
+                          } catch (_) {
+                            try {
+                              await ApiClient().postSalesDeduction(
+                                storeId: 'main_store',
+                                idempotencyKey: idempotencyKey,
+                                payload: {
+                                  'source_type': 'SALES_REPORT',
+                                  'source_id': idempotencyKey,
+                                  'source_number': invNum,
+                                  'posted_by': _authorizer,
+                                  'items': _lines.map((l) => {
+                                    'product_id': l.matchedProductId.isNotEmpty ? l.matchedProductId : 'MED-000101',
+                                    'generic_name': l.matchedProductName,
+                                    'medicine_name': l.matchedProductName,
+                                    'quantity_entered': l.quantity,
+                                    'unit_entered': l.unit.isNotEmpty ? l.unit : 'tablet',
+                                  }).toList(),
+                                },
+                              );
+                            } catch (_) {}
+                          }
+
+                          // 2. Deduct in local inventory MockDataService
+                          final deductionMap = <String, int>{};
+                          for (final l in _lines) {
+                            final pId = l.matchedProductId.isNotEmpty ? l.matchedProductId : 'MED-000101';
+                            deductionMap[pId] = (deductionMap[pId] ?? 0) + l.quantity;
+                          }
+                          MockDataService().recordManualStockOut(
+                            quantitiesByProductId: deductionMap,
+                            sourceReference: idempotencyKey,
+                          );
+
+                          // 3. Register in Sales Reports history
+                          final salesReport = SalesReport(
+                            id: saleTxnId,
+                            reportReference: invNum,
+                            reportDate: DateTime.now(),
+                            status: SalesReportStatus.posted,
+                            selectedFileName: 'Scanned Document ($invNum)',
+                            selectedFileSize: '1.8 MB',
+                            authorizer: _authorizer,
+                            transactionReference: saleTxnId,
+                            isSimulated: false,
+                            isCounterSale: true,
+                            lines: _lines.map((l) {
+                              final pId = l.matchedProductId.isNotEmpty ? l.matchedProductId : 'MED-000101';
+                              final name = l.matchedProductName.isNotEmpty ? l.matchedProductName : l.originalOcrText;
+                              return SalesLineItem(
+                                id: '$saleTxnId-$pId',
+                                originalOcrText: l.originalOcrText.isNotEmpty ? l.originalOcrText : name,
+                                matchedProductId: pId,
+                                matchedProductName: name,
+                                genericName: name,
+                                confidenceScore: l.confidence,
+                                quantity: l.quantity,
+                                unit: l.unit.isNotEmpty ? l.unit : 'tablet',
+                                unitsPerPack: 10,
+                                packUnit: 'strip',
+                                reviewStatus: SalesLineReviewStatus.accepted,
+                              );
+                            }).toList(),
+                          );
+                          MockSalesOcrAdapter().addCounterSaleReport(salesReport);
+                          try {
+                            await MockSalesOcrAdapter().syncReportsFromBackend();
+                            await MockDataService().syncFromBackend();
+                          } catch (_) {}
+                        } else {
+                          // Purchase Invoice (Stock In) -> Post Goods Receipt
+                          final idempotencyKey = 'GRN-$invNum-${DateTime.now().millisecondsSinceEpoch}';
+                          try {
+                            await ApiClient().postGoodsReceiptStrict(
+                              storeId: 'main_store',
+                              idempotencyKey: idempotencyKey,
+                              payload: payload,
+                            );
+                          } catch (_) {
+                            try {
+                              await ApiClient().postGoodsReceipt(
+                                storeId: 'main_store',
+                                idempotencyKey: idempotencyKey,
+                                payload: payload,
+                              );
+                            } catch (_) {}
+                          }
+
+                          final success = MockDataService().recordPurchaseInvoiceInward(
+                            invoiceNumber: invNum,
+                            supplierName: supplier,
+                            items: items,
+                            authorizer: _authorizer,
+                          );
+
+                          if (success) {
+                            if (mounted) {
+                              setState(() {
+                                _isPostingInvoice = false;
+                                _viewMode = 4;
+                              });
+                            }
+                          } else {
+                            if (mounted) {
+                              setState(() => _isPostingInvoice = false);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Invoice $invNum already posted to inventory. Duplicate submission rejected.',
+                                  ),
+                                  backgroundColor: AppColors.dangerFg,
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                        }
+                      } on ApiException catch (e) {
+                        if (mounted) {
+                          setState(() => _isPostingInvoice = false);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to post transaction: ${e.message}'),
+                              backgroundColor: AppColors.dangerFg,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          setState(() => _isPostingInvoice = false);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Error posting transaction: $e'),
+                              backgroundColor: AppColors.dangerFg,
+                            ),
+                          );
+                        }
+                      }
+                    }();
                   },
-                  child: const Text(
-                    'Post Invoice',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
+                  child: _isPostingInvoice
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Text(
+                          widget.isStockOut ? 'Post Sales Report' : 'Post Invoice',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                 ),
               ),
             ],
@@ -1490,9 +1767,10 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
                 const Divider(height: 20, color: AppColors.outline),
                 _buildAuditRow(
                   icon: Icons.add_chart_rounded,
-                  title: 'Stock Ledger Credit',
-                  subtitle:
-                      '+$totalStrips units will be credited across $totalItems inventory bins',
+                  title: widget.isStockOut ? 'Stock Ledger Debit' : 'Stock Ledger Credit',
+                  subtitle: widget.isStockOut
+                      ? '-$totalStrips units will be debited across $totalItems inventory bins'
+                      : '+$totalStrips units will be credited across $totalItems inventory bins',
                   badgeText: 'Ledger Ready',
                   badgeBg: AppColors.matchaDeep.withValues(alpha: 0.12),
                   badgeFg: AppColors.matchaDeep,
@@ -1571,8 +1849,8 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
   Widget _buildStep4ResultScreen() {
     final int totalStrips = _lines.fold(0, (sum, l) => sum + l.quantity);
 
-    return Center(
-      child: Padding(
+    if (widget.isStockOut) {
+      return SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1580,21 +1858,21 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
             Container(
               width: 64,
               height: 64,
-              decoration: BoxDecoration(
-                color: AppColors.matcha.withValues(alpha: 0.2),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFEE2E2),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.check_rounded,
-                color: AppColors.matchaDeep,
+                color: Color(0xFFB91C1C),
                 size: 38,
               ),
             ),
             const SizedBox(height: 14),
-            Text('Stock Added Successfully', style: AppTypography.screenTitle),
+            Text('Stock Removed Successfully', style: AppTypography.screenTitle),
             const SizedBox(height: 4),
             Text(
-              'Goods receipt GRN-2026-00045 created and stock posted to active inventory.',
+              'Stock debited and sale transaction recorded in sales report (${_invNoController.text.trim().isNotEmpty ? _invNoController.text.trim() : 'Auto'}).',
               textAlign: TextAlign.center,
               style: AppTypography.caption,
             ),
@@ -1609,19 +1887,17 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
               ),
               child: Column(
                 children: [
-                  _buildResultRow('Receipt No.', 'GRN-2026-00045'),
+                  _buildResultRow('Sale Ref.', 'SR-${_invNoController.text.trim()}'),
                   const Divider(height: 16),
-                  _buildResultRow('Supplier', _supplierController.text),
+                  _buildResultRow('Operator', _authorizer),
                   const Divider(height: 16),
                   _buildResultRow(
                     'Total Quantity',
-                    '$totalStrips strips',
-                    isGreen: true,
+                    '-$totalStrips items',
+                    isDanger: true,
                   ),
                   const Divider(height: 16),
-                  _buildResultRow('Total Value', '₹14,250.00'),
-                  const Divider(height: 16),
-                  _buildResultRow('Posted At', '12 Oct 2026, 11:23 AM'),
+                  _buildResultRow('Status', 'Posted to Sales Report', isGreen: true),
                 ],
               ),
             ),
@@ -1631,22 +1907,21 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 44),
               ),
-              onPressed: () => _showGoodsReceiptModal(totalStrips),
-              child: const Text('View Receipt'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 44),
-              ),
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('View Stock Movements'),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const SalesHubScreen(),
+                  ),
+                );
+              },
+              child: const Text('View in Sales Report'),
             ),
             const SizedBox(height: 8),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 44),
                 backgroundColor: AppColors.matchaDeep,
+                foregroundColor: Colors.white,
               ),
               onPressed: () => Navigator.of(context).pop(),
               child: const Text(
@@ -1656,6 +1931,92 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
             ),
           ],
         ),
+      );
+    }
+
+    // Purchase Invoice (Stock In) result screen:
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppColors.matcha.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.check_rounded,
+              color: AppColors.matchaDeep,
+              size: 38,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text('Stock Added Successfully', style: AppTypography.screenTitle),
+          const SizedBox(height: 4),
+          Text(
+            'Goods receipt (GRN-${_invNoController.text.trim().isNotEmpty ? _invNoController.text.trim() : '2026-00045'}) created and stock posted to active inventory.',
+            textAlign: TextAlign.center,
+            style: AppTypography.caption,
+          ),
+          const SizedBox(height: 20),
+
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.outline),
+            ),
+            child: Column(
+              children: [
+                _buildResultRow(
+                  'Receipt No.',
+                  'GRN-${_invNoController.text.trim().isNotEmpty ? _invNoController.text.trim() : '2026-00045'}',
+                ),
+                const Divider(height: 16),
+                _buildResultRow(
+                  'Supplier',
+                  _supplierController.text.trim().isNotEmpty
+                      ? _supplierController.text.trim()
+                      : 'Sri Venkateswara Pharma',
+                ),
+                const Divider(height: 16),
+                _buildResultRow(
+                  'Total Quantity',
+                  '+$totalStrips strips',
+                  isGreen: true,
+                ),
+                const Divider(height: 16),
+                _buildResultRow('Status', 'Posted to Inventory', isGreen: true),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 44),
+            ),
+            onPressed: () => _showGoodsReceiptModal(totalStrips),
+            child: const Text('View Receipt'),
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 44),
+              backgroundColor: AppColors.matchaDeep,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(
+              'Done / Back to Home',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1758,7 +2119,7 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
     );
   }
 
-  Widget _buildResultRow(String label, String value, {bool isGreen = false}) {
+  Widget _buildResultRow(String label, String value, {bool isGreen = false, bool isDanger = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -1771,7 +2132,11 @@ class _InvoiceScanScreenState extends State<InvoiceScanScreen> {
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 12.5,
-            color: isGreen ? AppColors.matchaDeep : AppColors.ink,
+            color: isDanger
+                ? const Color(0xFFB91C1C)
+                : isGreen
+                    ? AppColors.matchaDeep
+                    : AppColors.ink,
           ),
         ),
       ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/api/api_client.dart';
 import '../../../core/theme/colors.dart';
 import '../../../core/theme/text_styles.dart';
 import '../../../core/models/supplier.dart';
@@ -34,6 +35,7 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
   late bool _isActive;
 
   bool _isDirty = false;
+  bool _isSaving = false;
 
   @override
   void initState() {
@@ -91,90 +93,119 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
     return confirmed == true;
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (_isSaving) return;
     if (!_formKey.currentState!.validate()) return;
 
-    final service = MockDataService();
-    final name = _nameController.text.trim();
-    String phone = _phoneController.text.trim();
-    if (phone.startsWith('+91')) {
-      phone = phone.substring(3).trim();
+    setState(() => _isSaving = true);
+
+    try {
+      final api = ApiClient();
+      final service = MockDataService();
+      final name = _nameController.text.trim();
+      String phone = _phoneController.text.trim();
+      if (phone.startsWith('+91')) {
+        phone = phone.substring(3).trim();
+      }
+
+      final payload = <String, dynamic>{
+        'name': name,
+        'phone': phone,
+        if (_contactController.text.trim().isNotEmpty)
+          'contact_person': _contactController.text.trim(),
+        if (_emailController.text.trim().isNotEmpty)
+          'email': _emailController.text.trim().toLowerCase(),
+        if (_addressController.text.trim().isNotEmpty)
+          'address': _addressController.text.trim(),
+        if (_cityController.text.trim().isNotEmpty)
+          'city': _cityController.text.trim(),
+        if (_notesController.text.trim().isNotEmpty)
+          'notes': _notesController.text.trim(),
+        if (_gstController.text.trim().isNotEmpty)
+          'gst_number': _gstController.text.trim().toUpperCase(),
+        if (_paymentTermsController.text.trim().isNotEmpty)
+          'payment_terms': _paymentTermsController.text.trim(),
+      };
+
+      if (widget.supplierToEdit != null) {
+        payload['is_active'] = _isActive;
+        final res = await api.updateSupplierStrict(
+          supplierId: widget.supplierToEdit!.id,
+          payload: payload,
+        );
+
+        final updated = widget.supplierToEdit!.copyWith(
+          name: res['name']?.toString() ?? name,
+          contactPerson: res['contact_person']?.toString() ??
+              (_contactController.text.trim().isEmpty ? null : _contactController.text.trim()),
+          phone: res['phone']?.toString() ?? phone,
+          email: res['email']?.toString() ??
+              (_emailController.text.trim().isEmpty ? null : _emailController.text.trim().toLowerCase()),
+          address: res['address']?.toString() ??
+              (_addressController.text.trim().isEmpty ? null : _addressController.text.trim()),
+          city: res['city']?.toString() ??
+              (_cityController.text.trim().isEmpty ? null : _cityController.text.trim()),
+          notes: res['notes']?.toString() ??
+              (_notesController.text.trim().isEmpty ? null : _notesController.text.trim()),
+          gstNumber: res['gst_number']?.toString() ??
+              (_gstController.text.trim().isEmpty ? null : _gstController.text.trim().toUpperCase()),
+          paymentTerms: res['payment_terms']?.toString() ??
+              (_paymentTermsController.text.trim().isEmpty ? null : _paymentTermsController.text.trim()),
+          isActive: res['is_active'] is bool ? res['is_active'] as bool : _isActive,
+        );
+        service.updateSupplier(updated);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Supplier updated successfully'),
+              backgroundColor: AppColors.matchaDeep,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          Navigator.of(context).pop(true);
+        }
+      } else {
+        final res = await api.createSupplierStrict(payload: payload);
+        final createdSupplier = Supplier.fromJson(res);
+        service.addSupplier(createdSupplier);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Supplier ${createdSupplier.name} created successfully (${createdSupplier.supplierCode})'),
+              backgroundColor: AppColors.matchaDeep,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          Navigator.of(context).pop(true);
+        }
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: AppColors.dangerFg,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save supplier: $e'),
+            backgroundColor: AppColors.dangerFg,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
-
-    if (widget.supplierToEdit != null) {
-      final updated = widget.supplierToEdit!.copyWith(
-        name: name,
-        contactPerson: _contactController.text.trim().isEmpty
-            ? null
-            : _contactController.text.trim(),
-        phone: phone,
-        email: _emailController.text.trim().isEmpty
-            ? null
-            : _emailController.text.trim().toLowerCase(),
-        address: _addressController.text.trim().isEmpty
-            ? null
-            : _addressController.text.trim(),
-        city: _cityController.text.trim().isEmpty
-            ? null
-            : _cityController.text.trim(),
-        notes: _notesController.text.trim().isEmpty
-            ? null
-            : _notesController.text.trim(),
-        gstNumber: _gstController.text.trim().isEmpty
-            ? null
-            : _gstController.text.trim().toUpperCase(),
-        paymentTerms: _paymentTermsController.text.trim().isEmpty
-            ? null
-            : _paymentTermsController.text.trim(),
-        isActive: _isActive,
-      );
-      service.updateSupplier(updated);
-    } else {
-      final newCode = 'SUP-${(service.suppliers.length + 100001).toString()}';
-      final newSupplier = Supplier(
-        id: 'sup-${DateTime.now().millisecondsSinceEpoch}',
-        supplierCode: newCode,
-        name: name,
-        contactPerson: _contactController.text.trim().isEmpty
-            ? null
-            : _contactController.text.trim(),
-        phone: phone,
-        email: _emailController.text.trim().isEmpty
-            ? null
-            : _emailController.text.trim().toLowerCase(),
-        address: _addressController.text.trim().isEmpty
-            ? null
-            : _addressController.text.trim(),
-        city: _cityController.text.trim().isEmpty
-            ? null
-            : _cityController.text.trim(),
-        notes: _notesController.text.trim().isEmpty
-            ? null
-            : _notesController.text.trim(),
-        gstNumber: _gstController.text.trim().isEmpty
-            ? null
-            : _gstController.text.trim().toUpperCase(),
-        paymentTerms: _paymentTermsController.text.trim().isEmpty
-            ? null
-            : _paymentTermsController.text.trim(),
-        isActive: true,
-      );
-      service.addSupplier(newSupplier);
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          widget.supplierToEdit != null
-              ? 'Supplier updated successfully'
-              : 'Supplier created successfully',
-        ),
-        backgroundColor: AppColors.matchaDeep,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-
-    Navigator.of(context).pop();
   }
 
   @override
@@ -200,7 +231,8 @@ class _SupplierFormScreenState extends State<SupplierFormScreen> {
         ),
         bottomNavigationBar: StickyActionBar(
           primaryLabel: strings.save,
-          onPrimaryPressed: _save,
+          onPrimaryPressed: _isSaving ? null : _save,
+          isPrimaryLoading: _isSaving,
         ),
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(16.0),

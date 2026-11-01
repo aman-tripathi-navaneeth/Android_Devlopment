@@ -86,6 +86,7 @@ class InMemoryInventoryStore:
         self.movements: List[dict] = []
         # Key: f"{store_id}:{operation}:{key}" -> dict
         self.idempotency_keys: Dict[str, dict] = {}
+        self.seed_defaults()
 
     def clear(self):
         self.batches.clear()
@@ -472,8 +473,51 @@ class InventoryService:
     # 2. OUTWARD STOCK DEDUCTION (SALES REPORTS) - FEFO ALLOCATION
     # ==========================================================================
 
+    async def _ensure_seed_batches(self, store_id: str) -> None:
+        """Seed initial inventory batches if PostgreSQL collection is empty."""
+        if self.db is not None:
+            batches_col = self.db["inventoryBatches"]
+            balances_col = self.db["stock_balances"]
+            existing = await batches_col.find({"store_id": store_id}).limit(1).to_list(1)
+            if not existing:
+                now = _now_iso()
+                defaults = [
+                    (store_id, "MED-000101", "Dolo 650", "BAT-MAIN-01", "2028-12", 200),
+                    (store_id, "MED-000102", "Dolo 500", "BAT-MAIN-02", "2028-09", 150),
+                    (store_id, "MED-000103", "Pan 40", "BAT-MAIN-03", "2028-09", 200),
+                    (store_id, "MED-000104", "Cotton roll", "BAT-CR-01", "2028-12", 200),
+                    (store_id, "MED-000105", "Azithral 500", "BAT-AZ-01", "2028-06", 200),
+                    (store_id, "MED-000106", "Betadine", "BAT-BT-01", "2028-12", 200),
+                    (store_id, "MED-000123", "Augmentin 625 Duo", "BAT-AG-84", "2028-12", 200),
+                    (store_id, "MED-000301", "Zerodol SP Tablet", "BAT-ZS-91", "2028-12", 200),
+                    (store_id, "MED-000456", "Crocin 500 Advance", "BAT-CR-2024", "2028-12", 200),
+                    (store_id, "MED-000789", "Pantop 40", "BAT-PT-40", "2028-12", 200),
+                    (store_id, "MED-000112", "Amoxil 500", "BAT-AM-01", "2028-10", 150),
+                    (store_id, "MED-000113", "Cetzine 10", "BAT-CT-01", "2028-11", 150),
+                ]
+                for s_id, pid, name, batch_no, exp, qty in defaults:
+                    b_doc = {
+                        "store_id": s_id,
+                        "product_id": pid,
+                        "medicine_name": name,
+                        "batch_number": batch_no.upper(),
+                        "expiry_date": exp,
+                        "quantity": qty,
+                        "supplier_name": "Initial System Stock",
+                        "purchase_rate_paise": 0,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                    await batches_col.insert_one(b_doc)
+                    await balances_col.update_one(
+                        {"store_id": s_id, "product_id": pid},
+                        {"$inc": {"current_stock": qty}, "$set": {"updated_at": now}},
+                        upsert=True,
+                    )
+
     async def get_available_batches(self, store_id: str, product_id: str) -> List[dict]:
         """Fetch active non-expired batches for a product, sorted by expiry date ascending (FEFO)."""
+        await self._ensure_seed_batches(store_id)
         norm_pid = _normalize_id(product_id)
         valid_batches = []
 

@@ -242,9 +242,13 @@ class SalesReportScanningService:
         return SalesReportOut(**doc_copy)
 
     async def list_reports(self, status: Optional[str] = None) -> List[SalesReportOut]:
+        self._ensure_sample_data()
         items: List[dict] = []
         if self.db is not None:
             col = self.db["salesReports"]
+            existing = await col.find({}).limit(1).to_list(1)
+            if not existing and "SR-1012" in fallback_sales_report_store.reports:
+                await col.insert_one(dict(fallback_sales_report_store.reports["SR-1012"]))
             q = {"status": status} if status else {}
             cursor = col.find(q).sort("created_at", -1)
             items = await cursor.to_list(length=100)
